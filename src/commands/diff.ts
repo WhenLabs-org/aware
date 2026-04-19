@@ -1,30 +1,29 @@
 import chalk from "chalk";
-import { detectStack, stackToConfig, formatStackSummary } from "../detectors/index.js";
+import { computeDriftReport, exitCodeFor } from "../diff/index.js";
+import type { DriftReport, ContentDrift, StackDrift } from "../diff/index.js";
 import { loadConfig } from "../utils/config.js";
 import { log } from "../utils/logger.js";
 import { confirm } from "../utils/prompts.js";
 import { syncCommand } from "./sync.js";
-import type { StackConfig } from "../types.js";
-
-const KEY_LABELS: Record<string, string> = {
-  framework: "Framework",
-  language: "Language",
-  styling: "Styling",
-  orm: "ORM",
-  database: "Database",
-  testing: "Testing",
-  linting: "Linting",
-  packageManager: "Package Manager",
-  monorepo: "Monorepo",
-  deployment: "Deployment",
-  auth: "Auth",
-  apiStyle: "API Style",
-  stateManagement: "State Mgmt",
-  cicd: "CI/CD",
-  bundler: "Bundler",
-};
+import type { TargetName } from "../types.js";
 
 interface DiffOptions {
+  /**
+   * CI / script mode: print human output then exit with a code that reflects
+   * the highest severity found (0 no drift, 1 warn, 2 tamper). Non-zero
+   * exit is what makes this command usable as a pre-commit / CI guard.
+   */
+  check?: boolean;
+  /** Emit a machine-readable JSON `DriftReport` to stdout instead of text. */
+  json?: boolean;
+  /** Restrict the content-drift check to a single target. */
+  target?: TargetName;
+  /** Suppress human output under `--check` (still exits with the right code). */
+  quiet?: boolean;
+  /**
+   * Legacy flag, pre-Phase-1: exit 0 / 1 based on stack changes alone.
+   * Superseded by `--check`. Kept so existing scripts don't break.
+   */
   exitCode?: boolean;
 }
 
@@ -37,117 +36,129 @@ export async function diffCommand(options: DiffOptions = {}): Promise<void> {
     process.exit(1);
   }
 
-  // Re-detect
-  const stack = await detectStack(projectRoot);
-  const newStackConfig = stackToConfig(stack);
+  const report = await computeDriftReport({
+    projectRoot,
+    config,
+    ...(options.target ? { target: options.target } : {}),
+  });
 
-  const lastSync = config._meta.lastSyncedAt;
-  const timeAgo = lastSync ? timeSince(new Date(lastSync)) : "never";
-
-  log.header(`\nStack diff (last sync: ${timeAgo})\n`);
-
-  // Compare stack with colored output
-  const oldStack = config.stack;
-  const changes: Array<{ key: string; label: string; old: string; new: string }> = [];
-  const unchanged: string[] = [];
-
-  for (const key of Object.keys(newStackConfig) as (keyof StackConfig)[]) {
-    const oldVal = formatValue(oldStack[key]);
-    const newVal = formatValue(newStackConfig[key]);
-    const label = KEY_LABELS[key] ?? key;
-
-    if (oldVal !== newVal) {
-      changes.push({ key, label, old: oldVal, new: newVal });
-    } else if (oldVal !== "--") {
-      unchanged.push(`${label}: ${oldVal}`);
-    }
-  }
-
-  if (changes.length === 0) {
-    log.success("No stack changes detected.\n");
-    printUnchanged(unchanged);
-    printSuggestions(config);
-    if (options.exitCode) {
-      process.exit(0);
-    }
+  if (options.json) {
+    // Deliberately plain `console.log` — stdout must be valid JSON only.
+    console.log(JSON.stringify(report, null, 2));
+    if (options.check) process.exit(exitCodeFor(report.severity));
     return;
   }
 
-  // Print changes table
-  const labelWidth = Math.max(...changes.map((c) => c.label.length), 12);
-
-  for (const change of changes) {
-    const padded = change.label.padEnd(labelWidth);
-
-    if (change.old === "--" && change.new !== "--") {
-      // New addition
-      console.log(`  ${chalk.green("+")} ${padded}  ${chalk.green(change.new)}`);
-    } else if (change.old !== "--" && change.new === "--") {
-      // Removal
-      console.log(`  ${chalk.red("-")} ${padded}  ${chalk.red.strikethrough(change.old)}`);
-    } else {
-      // Change
-      console.log(`  ${chalk.yellow("~")} ${padded}  ${chalk.red(change.old)} ${chalk.dim("→")} ${chalk.green(change.new)}`);
-    }
+  if (!options.quiet) {
+    renderReport(report, config._meta.lastSyncedAt);
   }
 
-  log.plain("");
-  log.dim(`  ${changes.length} change(s), ${unchanged.length} unchanged`);
-
-  // Print unchanged (collapsed)
-  printUnchanged(unchanged);
-
-  // Suggestions
-  printSuggestions(config);
-
-  // In exit-code mode, exit 1 to signal changes were detected (useful for CI/scripting)
+  if (options.check) {
+    process.exit(exitCodeFor(report.severity));
+  }
   if (options.exitCode) {
-    process.exit(1);
+    // Legacy: 1 iff any stack drift exists (old behavior predates content drift).
+    process.exit(report.hasStackDrift ? 1 : 0);
   }
 
-  // Offer to sync
-  log.plain("");
-  const apply = await confirm("Apply changes and sync?");
-  if (apply) {
-    await syncCommand({ dryRun: false });
-  }
-}
-
-function formatValue(val: string | string[] | null | undefined): string {
-  if (val === null || val === undefined) return "--";
-  if (Array.isArray(val)) {
-    return val.length === 0 ? "--" : val.join(", ");
-  }
-  return val;
-}
-
-function printUnchanged(unchanged: string[]): void {
-  if (unchanged.length > 0) {
+  // Interactive: offer to sync when there's drift and no machine-readable mode.
+  if (report.severity !== "none") {
     log.plain("");
-    log.dim(`  Unchanged: ${unchanged.join(", ")}`);
-  }
-}
-
-function printSuggestions(config: { project: { description: string; architecture: string }; rules: string[]; conventions: Record<string, unknown> }): void {
-  const suggestions: string[] = [];
-
-  if (!config.project.description) {
-    suggestions.push("Add a project description (project.description)");
-  }
-  if (!config.project.architecture) {
-    suggestions.push("Add architecture description (project.architecture)");
-  }
-  if (config.rules.length === 0) {
-    suggestions.push("Add project-specific rules (rules array)");
-  }
-
-  if (suggestions.length > 0) {
-    log.plain("");
-    log.header("Suggestions:");
-    for (const s of suggestions) {
-      log.dim(`  - ${s}`);
+    const apply = await confirm("Apply changes and sync?");
+    if (apply) {
+      await syncCommand({ dryRun: false });
     }
   }
+}
+
+function renderReport(report: DriftReport, lastSyncedAt: string | null): void {
+  const when = lastSyncedAt ? timeSince(new Date(lastSyncedAt)) : "never";
+  log.header(`\naware diff  (last sync: ${when})\n`);
+
+  if (report.severity === "none") {
+    log.success("No drift detected — stack, config, and generated files all match.");
+    return;
+  }
+
+  if (report.hasStackDrift) {
+    log.header("Stack drift:");
+    const labelWidth = Math.max(
+      ...report.stackDrifts.map((d) => d.label.length),
+      12,
+    );
+    for (const drift of report.stackDrifts) {
+      renderStackLine(drift, labelWidth);
+    }
+    log.plain("");
+  }
+
+  if (report.hasContentDrift) {
+    log.header("Generated file drift:");
+    for (const drift of report.contentDrifts) {
+      renderContentLine(drift);
+    }
+    log.plain("");
+  }
+
+  renderSummary(report);
+}
+
+function renderStackLine(drift: StackDrift, labelWidth: number): void {
+  const padded = drift.label.padEnd(labelWidth);
+  const prev = drift.previous ?? "--";
+  const curr = drift.current ?? "--";
+
+  switch (drift.kind) {
+    case "added":
+      console.log(`  ${chalk.green("+")} ${padded}  ${chalk.green(curr)}`);
+      break;
+    case "removed":
+      console.log(
+        `  ${chalk.red("-")} ${padded}  ${chalk.red.strikethrough(prev)}`,
+      );
+      break;
+    case "changed":
+      console.log(
+        `  ${chalk.yellow("~")} ${padded}  ${chalk.red(prev)} ${chalk.dim("→")} ${chalk.green(curr)}`,
+      );
+      break;
+  }
+}
+
+function renderContentLine(drift: ContentDrift): void {
+  const colored =
+    drift.kind === "tampered"
+      ? chalk.red
+      : drift.kind === "outdated"
+        ? chalk.yellow
+        : drift.kind === "missing"
+          ? chalk.magenta
+          : chalk.dim;
+  const icon = drift.kind === "tampered" ? "!" : "~";
+  console.log(`  ${colored(icon)} ${colored(drift.kind.padEnd(9))}  ${drift.message}`);
+  if (drift.sections && drift.sections.length > 0) {
+    for (const section of drift.sections) {
+      const marker =
+        section.kind === "added" ? "+" : section.kind === "removed" ? "-" : "~";
+      console.log(`      ${chalk.dim(marker)} ${chalk.dim(section.id)}`);
+    }
+  }
+}
+
+function renderSummary(report: DriftReport): void {
+  const parts: string[] = [];
+  if (report.hasStackDrift) parts.push(`${report.stackDrifts.length} stack change(s)`);
+  if (report.hasContentDrift)
+    parts.push(`${report.contentDrifts.length} file drift(s)`);
+  if (report.hasTamper) parts.push(chalk.red("tampering detected"));
+
+  const summary = parts.join(", ");
+  if (report.severity === "tamper") {
+    log.error(`Summary: ${summary}`);
+  } else {
+    log.warn(`Summary: ${summary}`);
+  }
+  log.dim("Run `aware sync` to reconcile.");
 }
 
 function timeSince(date: Date): string {

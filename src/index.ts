@@ -41,3 +41,19 @@ export {
   HASH_MARKER_PREFIX,
   HASH_PLACEHOLDER,
 } from "./constants.js";
+export {
+  computeDriftReport,
+  computeStackDrift,
+  computeContentDrift,
+  diffSections,
+  exitCodeFor,
+} from "./diff/index.js";
+export type {
+  DriftReport,
+  DriftSeverity,
+  StackDrift,
+  ContentDrift,
+  ContentDriftKind,
+  SectionDrift,
+  ComputeDriftOptions,
+} from "./diff/index.js";

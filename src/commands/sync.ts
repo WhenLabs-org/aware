@@ -3,14 +3,19 @@ import ora from "ora";
 import { detectStack, stackToConfig } from "../detectors/index.js";
 import { resolveFragments } from "../fragments/index.js";
 import { generateAll } from "../generators/index.js";
+import { extractStampedHash } from "../core/hash.js";
 import { loadConfig, saveConfig, computeDetectionHash } from "../utils/config.js";
 import { readFile, writeFile } from "../utils/fs.js";
 import { log } from "../utils/logger.js";
-import type { DetectedStack } from "../types.js";
+import type { AwareConfig, DetectedStack, TargetName } from "../types.js";
 
 interface SyncOptions {
   dryRun: boolean;
 }
+
+// Root-package key for `_meta.fileHashes` / `_meta.fragmentVersions`.
+// Phase 4 will populate per-workspace keys alongside this root entry.
+const ROOT_PACKAGE_KEY = "";
 
 export async function syncCommand(options: SyncOptions): Promise<void> {
   const projectRoot = process.cwd();
@@ -57,9 +62,25 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
 
   // Write or dry-run
   let changesCount = 0;
+  const writtenHashes: Partial<Record<TargetName, string>> = {};
+  const writtenVersions: Partial<Record<TargetName, Record<string, string>>> =
+    {};
+
   for (const result of results) {
     const outputPath = path.join(projectRoot, result.filePath);
     const existing = await readFile(outputPath);
+
+    // Record provenance regardless of whether we actually write (so the
+    // config reflects the full set of enabled targets after sync).
+    const embedded = extractStampedHash(result.content);
+    if (embedded) writtenHashes[result.target] = embedded;
+    const fragmentVersions: Record<string, string> = {};
+    for (const f of fragments) {
+      if (f.version !== undefined) fragmentVersions[f.id] = f.version;
+    }
+    if (Object.keys(fragmentVersions).length > 0) {
+      writtenVersions[result.target] = fragmentVersions;
+    }
 
     if (existing === result.content) {
       log.dim(`  ${result.filePath} — no changes`);
@@ -81,6 +102,8 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
     // Update meta
     config._meta.lastSyncedAt = new Date().toISOString();
     config._meta.lastDetectionHash = newHash;
+    persistFileHashes(config, writtenHashes);
+    persistFragmentVersions(config, writtenVersions);
     await saveConfig(projectRoot, config);
   }
 
@@ -91,4 +114,27 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
   } else {
     log.success(`\n${changesCount} file(s) synced.`);
   }
+}
+
+function persistFileHashes(
+  config: AwareConfig,
+  hashes: Partial<Record<TargetName, string>>,
+): void {
+  if (!config._meta.fileHashes) config._meta.fileHashes = {};
+  config._meta.fileHashes[ROOT_PACKAGE_KEY] = {
+    ...config._meta.fileHashes[ROOT_PACKAGE_KEY],
+    ...hashes,
+  };
+}
+
+function persistFragmentVersions(
+  config: AwareConfig,
+  versions: Partial<Record<TargetName, Record<string, string>>>,
+): void {
+  if (Object.keys(versions).length === 0) return;
+  if (!config._meta.fragmentVersions) config._meta.fragmentVersions = {};
+  config._meta.fragmentVersions[ROOT_PACKAGE_KEY] = {
+    ...config._meta.fragmentVersions[ROOT_PACKAGE_KEY],
+    ...versions,
+  };
 }

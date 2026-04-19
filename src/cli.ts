@@ -6,7 +6,12 @@ import { watchCommand } from "./commands/watch.js";
 import { validateCommand } from "./commands/validate.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { addCommand } from "./commands/add.js";
+import {
+  installHooksCommand,
+  type CiProvider,
+} from "./commands/install-hooks.js";
 import { VERSION } from "./constants.js";
+import type { TargetName } from "./types.js";
 
 const program = new Command();
 
@@ -18,7 +23,11 @@ program
 program
   .command("init")
   .description("Detect project stack and generate AI context files")
-  .option("-t, --targets <targets>", "Comma-separated targets: claude,cursor,copilot,agents,all", "claude,cursor,copilot,agents")
+  .option(
+    "-t, --targets <targets>",
+    "Comma-separated targets: claude,cursor,copilot,agents,all",
+    "claude,cursor,copilot,agents",
+  )
   .option("-f, --force", "Overwrite existing files without prompting", false)
   .option("--no-detect", "Skip auto-detection, create empty config")
   .action(initCommand);
@@ -31,15 +40,62 @@ program
 
 program
   .command("diff")
-  .description("Show project changes since last sync")
-  .option("--exit-code", "Exit 0 if no changes, exit 1 if changes detected", false)
-  .action(diffCommand);
+  .description(
+    "Show stack drift and generated-file drift since last sync",
+  )
+  .option(
+    "--check",
+    "CI mode: exit 0/1/2 for clean/drift/tamper; no interactive prompt",
+    false,
+  )
+  .option("--json", "Emit a machine-readable DriftReport as JSON", false)
+  .option(
+    "--target <target>",
+    "Narrow content drift to one target (claude|cursor|copilot|agents)",
+  )
+  .option("--quiet", "Suppress human output (useful with --check)", false)
+  .option(
+    "--exit-code",
+    "(legacy) exit 1 on stack drift. Superseded by --check.",
+    false,
+  )
+  .action((opts) =>
+    diffCommand({
+      check: opts.check,
+      json: opts.json,
+      target: opts.target as TargetName | undefined,
+      quiet: opts.quiet,
+      exitCode: opts.exitCode,
+    }),
+  );
+
+program
+  .command("install-hooks")
+  .description(
+    "Install a git pre-commit hook that runs `aware diff --check`, or print a CI snippet with --ci.",
+  )
+  .option(
+    "--ci <provider>",
+    "Print a CI workflow snippet (github-actions|gitlab-ci|circleci) instead of installing a git hook",
+  )
+  .option("-f, --force", "Overwrite an existing hook", false)
+  .action((opts) =>
+    installHooksCommand({
+      ci: opts.ci as CiProvider | undefined,
+      force: opts.force,
+    }),
+  );
 
 program
   .command("watch")
   .description("Watch for project changes and auto-update context files")
   .option("--auto-sync", "Automatically sync without prompting", false)
-  .option("--debounce <ms>", "Milliseconds to wait after changes before triggering", (val: string) => parseInt(val, 10), 2000)
+  .option(
+    "--debounce <ms>",
+    "Milliseconds to wait after changes before triggering",
+    (val: string) => parseInt(val, 10),
+    2000,
+  )
   .action(watchCommand);
 
 program
@@ -49,7 +105,9 @@ program
 
 program
   .command("doctor")
-  .description("Diagnose project health: config issues, stack drift, stale files")
+  .description(
+    "Diagnose project health: config issues, stack drift, tampered/outdated context files",
+  )
   .action(doctorCommand);
 
 program
