@@ -7,8 +7,12 @@ import type {
 } from "../types.js";
 import { FragmentRegistry, defaultRegistry } from "./registry.js";
 
-// Framework fragments
-import { nextjs15Fragment } from "./framework/nextjs-15.js";
+// Framework fragments — version-aware modules for Next.js App Router.
+// Each module declares `appliesTo.versionRange` and the registry picks
+// whichever one matches the detected version; they share the same output
+// id (`nextjs-app-router`) so downstream consumers see a single fragment.
+import { nextjs14Module } from "./framework/nextjs-14.js";
+import { nextjs15Module } from "./framework/nextjs-15.js";
 import { nextjsPagesFragment } from "./framework/nextjs-pages.js";
 import { viteReactFragment } from "./framework/vite-react.js";
 import { expressFragment } from "./framework/express.js";
@@ -27,8 +31,11 @@ import { vueFragment } from "./framework/vue.js";
 import { goWebFragment } from "./framework/go-web.js";
 import { goFragment } from "./framework/go.js";
 
-// Styling fragments
-import { tailwindcssFragment } from "./styling/tailwindcss.js";
+// Styling fragments — Tailwind splits by major. v3 used a JS config file;
+// v4 is CSS-native. Wrong-version guidance tells the AI tool to edit
+// files that don't exist.
+import { tailwind3Module } from "./styling/tailwind-3.js";
+import { tailwind4Module } from "./styling/tailwind-4.js";
 import { styledComponentsFragment } from "./styling/styled-components.js";
 import { cssModulesFragment } from "./styling/css-modules.js";
 
@@ -81,9 +88,17 @@ import { xstateFragment } from "./state-management/xstate.js";
 import { githubActionsFragment } from "./cicd/github-actions.js";
 import { gitlabCiFragment } from "./cicd/gitlab-ci.js";
 
+// Phase 2 version-aware fragments ship as full FragmentModule manifests.
+// Legacy bare functions continue to register via the compat shim below.
+const coreModules: FragmentModule[] = [
+  nextjs14Module,
+  nextjs15Module,
+  tailwind3Module,
+  tailwind4Module,
+];
+
 const allFragmentFunctions: FragmentFunction[] = [
   // Framework (10-19)
-  nextjs15Fragment,
   nextjsPagesFragment,
   viteReactFragment,
   expressFragment,
@@ -102,8 +117,7 @@ const allFragmentFunctions: FragmentFunction[] = [
   goWebFragment,
   goFragment,
 
-  // Styling (20-29)
-  tailwindcssFragment,
+  // Styling (20-29) — tailwindcssFragment migrated to tailwind-3/4 manifests above.
   styledComponentsFragment,
   cssModulesFragment,
 
@@ -157,12 +171,18 @@ const allFragmentFunctions: FragmentFunction[] = [
   gitlabCiFragment,
 ];
 
-// Wrap each legacy fragment function as a FragmentModule. The legacy shape
-// carries id/category/priority inside the returned Fragment, so the
-// registry's legacy adapter runs the function and trusts the returned object.
-// Full migration to FragmentModule manifests happens in Phase 2.
+// Core fragments register in two waves:
+//   1. Full FragmentModule manifests (Phase 2+): Next.js by major,
+//      Tailwind by major. The registry gates them via `appliesTo` so
+//      only the matching version runs.
+//   2. Legacy bare `FragmentFunction` fragments (pre-Phase-2): each
+//      wraps itself, carrying id/category/priority inside the returned
+//      Fragment. Dup-id protection still applies at resolve time.
 let coreRegistered = false;
 function registerCoreFragments(registry: FragmentRegistry): void {
+  for (const mod of coreModules) {
+    registry.register(mod);
+  }
   for (const fn of allFragmentFunctions) {
     registry.registerLegacy(fn);
   }

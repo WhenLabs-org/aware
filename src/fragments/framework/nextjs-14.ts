@@ -6,12 +6,10 @@ import type {
 } from "../../types.js";
 import { matchesStack } from "../common.js";
 
-function buildNextjs15(
+function buildNextjs14(
   stack: DetectedStack,
   _config: AwareConfig,
 ): Fragment | null {
-  // `appliesTo` on the module already gates on framework=nextjs and
-  // version>=15, so we only need the variant check here.
   if (!matchesStack(stack.framework, "nextjs")) return null;
 
   const variant = stack.framework!.variant;
@@ -22,7 +20,7 @@ function buildNextjs15(
     category: "framework",
     title: "Next.js (App Router)",
     priority: 10,
-    content: `## Next.js 15 — App Router
+    content: `## Next.js 14 — App Router
 
 ### Routing & File Conventions
 - Use the \`app/\` directory; every route folder needs a \`page.tsx\` to be publicly accessible
@@ -30,19 +28,18 @@ function buildNextjs15(
 - \`loading.tsx\` shows instant loading UI via React Suspense; \`error.tsx\` catches segment errors
 - \`not-found.tsx\` handles 404s at any segment level
 - Route groups \`(groupName)/\` organize without affecting URL paths
-- Parallel routes (\`@slot\`) and intercepting routes \`(..)\` for modals and complex layouts
 
 ### Server vs Client Components
-- All components are **React Server Components** by default — they run only on the server
+- All components are **React Server Components** by default
 - Add \`'use client'\` at the top of a file **only** when the component needs interactivity, browser APIs, hooks (\`useState\`, \`useEffect\`), or event handlers
 - Never import a Server Component into a Client Component — pass it as \`children\` instead
-- Keep Client Components at the leaf of the component tree to minimize client JS bundle
 
-### Data Fetching & Caching (Next 15 defaults)
+### Data Fetching & Caching (Next 14 defaults)
 - Fetch data directly in Server Components using \`async/await\` — no \`useEffect\`
-- **\`fetch()\` is no longer cached by default in Next 15** — opt in explicitly with \`{ cache: 'force-cache' }\` or \`{ next: { revalidate: N } }\`
-- Route handlers (\`GET\`) are no longer cached by default either — mark with \`export const dynamic = 'force-static'\` if you want static caching
-- \`cookies()\`, \`headers()\`, \`draftMode()\`, \`params\`, \`searchParams\` are **async** in Next 15 — \`await\` them
+- **\`fetch()\` is cached by default in Next 14** (\`{ cache: 'force-cache' }\` is the default)
+- Opt out with \`{ cache: 'no-store' }\` for dynamic requests, or \`{ next: { revalidate: N } }\` for ISR
+- Route handlers (\`GET\`) are cached by default unless they read dynamic data (\`cookies()\`, \`headers()\`, etc.)
+- \`cookies()\`, \`headers()\`, \`params\`, \`searchParams\` are **synchronous** in Next 14
 
 ### Server Actions
 - Mark server-only mutation functions with \`'use server'\` directive
@@ -53,32 +50,28 @@ function buildNextjs15(
 ### Navigation & Metadata
 - Use \`next/navigation\` (\`useRouter\`, \`usePathname\`, \`useSearchParams\`) — never import from \`next/router\`
 - Export \`metadata\` object or \`generateMetadata()\` async function from \`page.tsx\`/\`layout.tsx\` for SEO
-- Use \`<Link href="...">\` for client-side transitions; it prefetches by default (\`prefetch={false}\` to opt out)
+- Use \`<Link href="...">\` for client-side transitions; it prefetches by default
 
 ### Assets & Optimization
 - Use \`next/image\` with explicit \`width\`/\`height\` or \`fill\` — never raw \`<img>\`
-- Use \`next/font\` to self-host fonts with zero layout shift
-- Turbopack is stable for \`next dev\` in 15; use \`--turbo\` to opt in`,
+- Use \`next/font\` to self-host fonts with zero layout shift`,
   };
 }
 
 /**
- * Next.js 15+ (App Router). The key guidance change from 14: `fetch()` and
- * route handlers are no longer cached by default, and request APIs
- * (`cookies`, `headers`, `params`) are async.
+ * Next.js 14 (App Router). Distinct from 15 because the caching defaults
+ * are inverted: `fetch()` and route handlers are cached by default in 14,
+ * uncached by default in 15 — guidance that tells a user the wrong thing
+ * on the wrong version is worse than no guidance.
  */
-export const nextjs15Module: FragmentModule = {
-  id: "nextjs-15",
+export const nextjs14Module: FragmentModule = {
+  id: "nextjs-14",
   category: "framework",
   priority: 10,
   appliesTo: {
     stack: "nextjs",
-    versionRange: ">=15",
+    versionRange: "14",
   },
-  version: "15.x",
-  build: buildNextjs15,
+  version: "14.x",
+  build: buildNextjs14,
 };
-
-// Legacy named export kept so existing imports (if any) still work until
-// fragments/index.ts is fully migrated.
-export const nextjs15Fragment = buildNextjs15;

@@ -26,6 +26,8 @@ export {
   verifyStampedHash,
   normalizeForHash,
 } from "./core/hash.js";
+export { readLockfile } from "./core/lockfile.js";
+export type { LockfileVersionMap } from "./core/lockfile.js";
 export {
   openMarker,
   closeMarker,
