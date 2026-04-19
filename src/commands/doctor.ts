@@ -139,7 +139,40 @@ export async function doctorCommand(): Promise<void> {
     }
   }
 
-  // 6. Empty description / missing rules / freshness
+  // 6. Convention extraction status. Surface whether extraction ran,
+  //    how many files were sampled, and what confidence each aspect had.
+  //    Users who never consented to code scanning can see it's happening
+  //    and opt out via `conventions.extract: false`.
+  if (config.conventions.extract === false) {
+    results.push({
+      label: "Convention extraction",
+      status: "warn",
+      message:
+        "Disabled (conventions.extract: false). Generated rules reflect " +
+        "framework defaults, not your codebase.",
+    });
+  } else if (config.conventions.extracted) {
+    const ext = config.conventions.extracted;
+    const pieces: string[] = [];
+    if (ext.naming) pieces.push(`naming=${ext.naming.files}`);
+    if (ext.tests?.layout) pieces.push(`tests=${ext.tests.layout}`);
+    if (ext.layout?.pattern) pieces.push(`layout=${ext.layout.pattern}`);
+    const summary = pieces.length > 0 ? pieces.join(", ") : "no high-confidence signals";
+    results.push({
+      label: "Convention extraction",
+      status: "ok",
+      message: `Active (${ext._sampleSize ?? 0} files sampled): ${summary}`,
+    });
+  } else {
+    results.push({
+      label: "Convention extraction",
+      status: "warn",
+      message:
+        "No extracted conventions recorded. Run `aware sync` to populate.",
+    });
+  }
+
+  // 7. Empty description / missing rules / freshness
   if (!config.project.description) {
     results.push({
       label: "Description",

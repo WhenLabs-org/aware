@@ -14,9 +14,19 @@ describe("classifyBasename", () => {
     expect(classifyBasename("user_profile.py")).toBe("snake_case");
   });
 
-  it("recognizes PascalCase", () => {
+  it("recognizes multi-token PascalCase", () => {
     expect(classifyBasename("UserProfile.tsx")).toBe("PascalCase");
-    expect(classifyBasename("Button.tsx")).toBe("PascalCase");
+    expect(classifyBasename("LoginForm.tsx")).toBe("PascalCase");
+  });
+
+  it("returns null for single-token capitalized names (ambiguous)", () => {
+    // `Button.tsx` in a components/ dir is PascalCase, but `Index.tsx`
+    // in a pages/ route is just a capitalized filename — not a
+    // convention. The general classifier stays conservative and the
+    // caller (extractNaming) uses the component-bucket classifier for
+    // files in components/ui dirs where that interpretation is safe.
+    expect(classifyBasename("Button.tsx")).toBeNull();
+    expect(classifyBasename("Index.tsx")).toBeNull();
   });
 
   it("recognizes camelCase", () => {

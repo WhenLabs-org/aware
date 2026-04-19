@@ -13,6 +13,14 @@ import type { AwareConfig, DetectedStack, TargetName } from "../types.js";
 
 interface SyncOptions {
   dryRun: boolean;
+  /**
+   * Re-seed user-facing convention fields (`conventions.naming` etc.)
+   * from freshly-extracted values. Default sync never touches those —
+   * they're user-authoritative once init has set them. Projects that
+   * upgraded from pre-Phase-3 aware got framework defaults that never
+   * reflected real code; this flag opts into one-shot refresh.
+   */
+  refreshConventions?: boolean;
 }
 
 export async function syncCommand(options: SyncOptions): Promise<void> {
@@ -60,8 +68,33 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
   // must never clobber a hand-edit. Downstream generators read from the
   // top-level fields as before; `extracted` is for record-keeping and
   // future drift-against-extracted-conventions detection.
+  //
+  // Exception: `--refresh-conventions` re-seeds the top-level fields
+  // from fresh extraction. This is the escape hatch for projects that
+  // initialized before Phase 3 and want to adopt the new values.
   if (config.conventions.extract !== false) {
-    config.conventions.extracted = await extractConventions(projectRoot);
+    const extractSpinner = ora("Sampling source files...").start();
+    const extracted = await extractConventions(projectRoot);
+    extractSpinner.stop();
+    config.conventions.extracted = extracted;
+
+    if (options.refreshConventions) {
+      if (extracted.naming) {
+        config.conventions.naming = {
+          ...(config.conventions.naming ?? {}),
+          ...extracted.naming,
+        };
+      }
+      if (extracted.tests) {
+        config.conventions.testing = {
+          ...(config.conventions.testing ?? {}),
+          ...extracted.tests,
+        };
+      }
+      log.info(
+        "Refreshed user-facing conventions from source-code extraction.",
+      );
+    }
   }
 
   // Generate

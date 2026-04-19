@@ -61,20 +61,38 @@ export function classifyBasename(basename: string): NamingStyle | null {
 
   if (name.length === 0) return null;
 
-  // Single-token names are ambiguous between camelCase and kebab-case
-  // (`utils` fits either). Skip — a convention is only observable from
-  // multi-token names where delimiters are visible.
+  // Single-token names are ambiguous between conventions:
+  //   - `utils` could be camelCase or kebab-case (one segment)
+  //   - `Button` could be PascalCase (component) or just "capitalized
+  //     route file" like Next.js `Index.tsx`
+  // We only classify a single-token name as PascalCase when the caller
+  // has already separated it into a component bucket (see
+  // `extractNaming` — it routes files in components/ dirs to the
+  // component vote, where a single capitalized token is unambiguously
+  // PascalCase). Here, we stay conservative and return null.
   if (!/[-_A-Z]/.test(name.slice(1))) {
-    // first char may be capital (PascalCase single word like "Button")
-    if (/^[A-Z]/.test(name)) {
-      return "PascalCase";
-    }
     return null;
   }
 
   for (const { style, regex } of STYLE_PATTERNS) {
     if (regex.test(name)) return style;
   }
+  return null;
+}
+
+/**
+ * Like `classifyBasename`, but treats a single-token capitalized name
+ * (e.g. `Button`) as PascalCase. Used only for files in component
+ * buckets where that interpretation is unambiguous.
+ */
+function classifyComponentBasename(basename: string): NamingStyle | null {
+  const general = classifyBasename(basename);
+  if (general !== null) return general;
+
+  let name = basename;
+  const firstDot = name.lastIndexOf(".");
+  if (firstDot > 0) name = name.slice(0, firstDot);
+  if (/^[A-Z][a-zA-Z0-9]*$/.test(name)) return "PascalCase";
   return null;
 }
 
@@ -94,10 +112,18 @@ export function extractNaming(sourceFiles: string[]): NamingExtraction {
 
   for (const relPath of sourceFiles) {
     const basename = path.posix.basename(relPath);
-    const style = classifyBasename(basename);
+    const isComponent = isComponentPath(relPath);
+
+    // Component bucket gets the permissive classifier that accepts a
+    // single-token capitalized name as PascalCase; everywhere else
+    // uses the strict version that skips those as ambiguous (otherwise
+    // Next.js route files like `Index.tsx` bias the general bucket).
+    const style = isComponent
+      ? classifyComponentBasename(basename)
+      : classifyBasename(basename);
     if (!style) continue;
 
-    if (isComponentPath(relPath)) {
+    if (isComponent) {
       componentVotes.set(style, (componentVotes.get(style) ?? 0) + 1);
       if (componentExamples[style].length < 3) componentExamples[style].push(relPath);
     } else {

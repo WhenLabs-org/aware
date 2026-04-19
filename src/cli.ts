@@ -36,7 +36,17 @@ program
   .command("sync")
   .description("Regenerate target files from .aware.json")
   .option("--dry-run", "Show what would change without writing files", false)
-  .action(syncCommand);
+  .option(
+    "--refresh-conventions",
+    "Re-seed user-facing convention fields from source-code extraction (pre-Phase-3 upgrade path)",
+    false,
+  )
+  .action((opts) =>
+    syncCommand({
+      dryRun: opts.dryRun,
+      refreshConventions: opts.refreshConventions,
+    }),
+  );
 
 program
   .command("diff")
