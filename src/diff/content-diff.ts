@@ -2,15 +2,35 @@ import * as path from "node:path";
 import { extractStampedHash, verifyStampedHash } from "../core/hash.js";
 import { parseSections } from "../core/markers.js";
 import { readFile } from "../utils/fs.js";
-import type { GeneratorResult } from "../types.js";
+import type { GeneratorResult, TargetName } from "../types.js";
 import type { ContentDrift, SectionDrift } from "./types.js";
+
+export interface DisabledTarget {
+  target: TargetName;
+  filePath: string;
+}
+
+export interface ContentDriftOptions {
+  /**
+   * Targets that are disabled in config. If the corresponding file still
+   * exists on disk it's surfaced with a `stale` verdict so callers can
+   * prompt the user to remove it. Enabled targets are passed via
+   * `expected` and go through the full four-verdict tree below.
+   */
+  disabled?: DisabledTarget[];
+  /**
+   * Package path relative to the repo root (Phase 4 monorepo use).
+   * Defaults to "" for the root/single-package case.
+   */
+  packagePath?: string;
+}
 
 /**
  * Compare on-disk generated files against what the generators would
  * produce right now. Returns one `ContentDrift` entry per drifted target.
  *
- * Verdict hierarchy (per file):
- *   1. File absent on disk (for an enabled target)       -> "missing"
+ * Verdict hierarchy (per enabled target):
+ *   1. File absent on disk                               -> "missing"
  *   2. File exists, no hash marker                       -> "unmanaged"
  *      (pre-Phase-0 file or hand-written — intentionally not treated
  *       as tampering because the user never opted in to aware's stamp.)
@@ -19,16 +39,26 @@ import type { ContentDrift, SectionDrift } from "./types.js";
  *      from what the generators would produce now
  *   5. Otherwise                                          -> no drift entry
  *
+ * Plus, for each *disabled* target whose file is still on disk:
+ *                                                         -> "stale"
+ *
  * Section attribution (only for "outdated"): parse sections in both the
  * on-disk file and the expected content, then diff by section id. If
  * either side has no markers or has structural issues, section attribution
  * is skipped — the file-level verdict still stands.
+ *
+ * Note on `_meta.fileHashes`: Phase 1 does NOT consume it. Tamper
+ * detection uses the hash embedded in the file itself
+ * (self-verifying via `verifyStampedHash`). The persisted map is
+ * Phase-4-ready metadata: per-package drift will use it to detect when a
+ * package's output moved without its config following.
  */
 export async function computeContentDrift(
   projectRoot: string,
   expected: GeneratorResult[],
-  packagePath = "",
+  options: ContentDriftOptions = {},
 ): Promise<ContentDrift[]> {
+  const packagePath = options.packagePath ?? "";
   const drifts: ContentDrift[] = [];
 
   for (const result of expected) {
@@ -90,6 +120,22 @@ export async function computeContentDrift(
       message: sections.length > 0
         ? `${result.filePath} is out of date (${sections.length} section(s) changed)`
         : `${result.filePath} is out of date — run \`aware sync\` to regenerate`,
+    });
+  }
+
+  // Second pass: disabled targets whose file is still on disk.
+  for (const disabled of options.disabled ?? []) {
+    const absPath = path.join(projectRoot, disabled.filePath);
+    const onDisk = await readFile(absPath);
+    if (onDisk === null) continue;
+    drifts.push({
+      target: disabled.target,
+      filePath: disabled.filePath,
+      packagePath,
+      kind: "stale",
+      message:
+        `${disabled.filePath} exists but its target is disabled in .aware.json. ` +
+        `Delete the file or re-enable the target.`,
     });
   }
 

@@ -45,8 +45,8 @@ export {
   computeDriftReport,
   computeStackDrift,
   computeContentDrift,
-  diffSections,
   exitCodeFor,
+  ROOT_PACKAGE_KEY,
 } from "./diff/index.js";
 export type {
   DriftReport,
@@ -56,4 +56,6 @@ export type {
   ContentDriftKind,
   SectionDrift,
   ComputeDriftOptions,
+  ContentDriftOptions,
+  DisabledTarget,
 } from "./diff/index.js";

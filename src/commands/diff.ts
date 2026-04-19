@@ -2,7 +2,7 @@ import chalk from "chalk";
 import { computeDriftReport, exitCodeFor } from "../diff/index.js";
 import type { DriftReport, ContentDrift, StackDrift } from "../diff/index.js";
 import { loadConfig } from "../utils/config.js";
-import { log } from "../utils/logger.js";
+import { log, setSilent } from "../utils/logger.js";
 import { confirm } from "../utils/prompts.js";
 import { syncCommand } from "./sync.js";
 import type { TargetName } from "../types.js";
@@ -30,6 +30,11 @@ interface DiffOptions {
 export async function diffCommand(options: DiffOptions = {}): Promise<void> {
   const projectRoot = process.cwd();
 
+  // Silence diagnostic logs so `--json` stdout is guaranteed parseable even
+  // if transitive code paths decide to log (migrations, future telemetry).
+  // Errors still go to stderr.
+  if (options.json) setSilent(true);
+
   const config = await loadConfig(projectRoot);
   if (!config) {
     log.error("No .aware.json found. Run `aware init` first.");
@@ -45,20 +50,32 @@ export async function diffCommand(options: DiffOptions = {}): Promise<void> {
   if (options.json) {
     // Deliberately plain `console.log` — stdout must be valid JSON only.
     console.log(JSON.stringify(report, null, 2));
-    if (options.check) process.exit(exitCodeFor(report.severity));
+    if (options.check) {
+      process.exit(exitCodeFor(report.severity));
+      return;
+    }
     return;
   }
 
-  if (!options.quiet) {
+  // Human output is suppressed in any non-interactive exit-code mode
+  // (either `--check` or legacy `--exit-code`) when `--quiet` is set, and
+  // also auto-suppressed for legacy `--exit-code` on its own — scripts
+  // piping that command's output never expected human lines.
+  const suppressHuman =
+    options.quiet === true || (options.exitCode === true && options.check !== true);
+
+  if (!suppressHuman) {
     renderReport(report, config._meta.lastSyncedAt);
   }
 
   if (options.check) {
     process.exit(exitCodeFor(report.severity));
+    return; // defensive: unreachable in prod, but test environments mock exit()
   }
   if (options.exitCode) {
     // Legacy: 1 iff any stack drift exists (old behavior predates content drift).
     process.exit(report.hasStackDrift ? 1 : 0);
+    return;
   }
 
   // Interactive: offer to sync when there's drift and no machine-readable mode.

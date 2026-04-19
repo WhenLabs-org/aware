@@ -97,32 +97,53 @@ describe("computeDriftReport end-to-end", () => {
   });
 
   it("reports severity=warn (not tamper) for stack drift alone", async () => {
-    // Seed with a stale config that doesn't match detectable reality.
+    // Seed a config whose framework doesn't match what detect() will find
+    // (package.json pins next@15; config claims next@14). Sync the files
+    // using the *saved* config so they're internally consistent and will
+    // verify cleanly — the only drift the engine should report is the
+    // stack discrepancy.
     const staleConfig = createDefaultConfig(
       "drift-e2e",
       { ...defaultStack, framework: "nextjs@14:app-router" },
       targets,
     );
     await saveConfig(tmp, staleConfig);
-
-    // Write a generated file that matches the stale config so content
-    // verifies cleanly — the only drift is the stale stack.
-    const staleScan = await scan({ projectRoot: tmp, targets, detect: false });
-    for (const file of staleScan.generatedFiles) {
+    const stale = await scan({ projectRoot: tmp, targets, detect: false });
+    for (const file of stale.generatedFiles) {
       await fs.writeFile(path.join(tmp, file.path), file.content);
     }
 
-    // In this fixture the package.json pins next@15; saved config says 14 →
-    // stack drift. Content is whatever the stale-config generator produced,
-    // which is self-consistent, so it verifies and we get "outdated"
-    // relative to the re-detected stack — together that's "warn", not
-    // "tamper".
     const report = await computeDriftReport({
       projectRoot: tmp,
       config: staleConfig,
     });
-    expect(report.severity).toBe("warn");
+    // Explicit expectations about the composition of the verdict:
+    //   - there IS stack drift (saved "14" vs detected "15")
+    //   - there is NO tampering (files self-verify)
+    //   - severity is "warn", not "tamper"
+    expect(report.hasStackDrift).toBe(true);
     expect(report.hasTamper).toBe(false);
+    expect(report.severity).toBe("warn");
+    expect(report.stackDrifts.some((d) => d.key === "framework")).toBe(true);
+  });
+
+  it("reports severity=warn for a disabled target whose file is still present", async () => {
+    // First sync with claude enabled so we get a valid CLAUDE.md on disk.
+    const result = await scan({ projectRoot: tmp, targets, detect: true });
+    await saveConfig(tmp, result.config);
+    for (const file of result.generatedFiles) {
+      await fs.writeFile(path.join(tmp, file.path), file.content);
+    }
+
+    // Now disable claude in the config without deleting the file —
+    // common scenario when someone reconfigures their targets.
+    result.config.targets.claude = false;
+    const report = await computeDriftReport({
+      projectRoot: tmp,
+      config: result.config,
+    });
+    expect(report.severity).toBe("warn");
+    expect(report.contentDrifts.some((d) => d.kind === "stale")).toBe(true);
   });
 
   it("restricts content drift to --target when specified", async () => {

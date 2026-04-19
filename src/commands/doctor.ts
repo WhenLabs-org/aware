@@ -68,37 +68,11 @@ export async function doctorCommand(): Promise<void> {
     });
   }
 
-  // 3. Per-target file presence / disabled-but-present
-  const targetEntries = Object.entries(TARGETS) as Array<
-    [keyof TargetsConfig, { file: string; name: string }]
-  >;
-  for (const [key, target] of targetEntries) {
-    const filePath = path.join(projectRoot, target.file);
-    const exists = await fileExists(filePath);
-    if (config.targets[key]) {
-      results.push(
-        exists
-          ? {
-              label: target.name,
-              status: "ok",
-              message: `${target.file} exists`,
-            }
-          : {
-              label: target.name,
-              status: "warn",
-              message: `${target.file} missing — run \`aware sync\``,
-            },
-      );
-    } else if (exists) {
-      results.push({
-        label: target.name,
-        status: "warn",
-        message: `${target.file} exists but target is disabled — consider removing it`,
-      });
-    }
-  }
-
-  // 4. Drift engine (stack + content)
+  // 3. Delegate all per-target health to the drift engine so `doctor`
+  //    and `diff --check` agree byte-for-byte. The engine covers:
+  //    - missing files for enabled targets
+  //    - tampered / outdated / unmanaged files
+  //    - stale files for disabled targets
   const spinner = ora("Checking drift...").start();
   const report = await computeDriftReport({ projectRoot, config });
   spinner.stop();
@@ -125,11 +99,19 @@ export async function doctorCommand(): Promise<void> {
       message: drift.message,
     });
   }
-  if (report.contentDrifts.length === 0) {
+
+  // Positive confirmation for targets that had no drift at all.
+  const driftedTargets = new Set(report.contentDrifts.map((d) => d.target));
+  const targetEntries = Object.entries(TARGETS) as Array<
+    [keyof TargetsConfig, { file: string; name: string }]
+  >;
+  for (const [key, target] of targetEntries) {
+    if (!config.targets[key]) continue;
+    if (driftedTargets.has(key)) continue;
     results.push({
-      label: "Generated file integrity",
+      label: target.name,
       status: "ok",
-      message: "All generated files verify against their stamped hashes",
+      message: `${target.file} verifies against its stamped hash`,
     });
   }
 

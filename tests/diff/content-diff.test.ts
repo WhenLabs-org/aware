@@ -90,4 +90,41 @@ describe("computeContentDrift", () => {
     const reverse = diffSections(newOut, oldOut);
     expect(reverse.find((s) => s.id === "b")?.kind).toBe("removed");
   });
+
+  it("section attribution degrades to empty when one side lacks markers", () => {
+    const withSections = wrapSection("a", "one");
+    const plainText = "just a plain markdown file";
+    // Neither direction should throw; both should return an empty array
+    // so the file-level verdict carries the message.
+    expect(diffSections(plainText, withSections)).toEqual([]);
+    expect(diffSections(withSections, plainText)).toEqual([]);
+  });
+
+  it("flags a stale file when its target is disabled", async () => {
+    await fs.writeFile(
+      path.join(tmp, "AGENTS.md"),
+      "# some generated-looking content",
+    );
+    const drifts = await computeContentDrift(tmp, [], {
+      disabled: [{ target: "agents", filePath: "AGENTS.md" }],
+    });
+    expect(drifts).toHaveLength(1);
+    expect(drifts[0]!.kind).toBe("stale");
+    expect(drifts[0]!.target).toBe("agents");
+  });
+
+  it("does not flag a disabled target whose file is absent", async () => {
+    const drifts = await computeContentDrift(tmp, [], {
+      disabled: [{ target: "agents", filePath: "AGENTS.md" }],
+    });
+    expect(drifts).toEqual([]);
+  });
+
+  it("threads packagePath onto every drift entry", async () => {
+    const result = makeResult("CLAUDE.md", wrapSection("stack", "# stack"));
+    const drifts = await computeContentDrift(tmp, [result], {
+      packagePath: "apps/web",
+    });
+    expect(drifts[0]!.packagePath).toBe("apps/web");
+  });
 });

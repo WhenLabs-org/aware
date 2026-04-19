@@ -31,7 +31,13 @@ export type ContentDriftKind =
   | "missing"
   | "outdated"
   | "tampered"
-  | "unmanaged";
+  | "unmanaged"
+  /**
+   * Target is disabled in config but its generated file is still on disk.
+   * Surfaced so `doctor` and `diff --check` agree on what should/shouldn't
+   * exist.
+   */
+  | "stale";
 
 export interface ContentDrift {
   target: TargetName;

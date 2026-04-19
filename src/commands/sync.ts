@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import ora from "ora";
 import { detectStack, stackToConfig } from "../detectors/index.js";
+import { ROOT_PACKAGE_KEY } from "../diff/index.js";
 import { resolveFragments } from "../fragments/index.js";
 import { generateAll } from "../generators/index.js";
 import { extractStampedHash } from "../core/hash.js";
@@ -12,10 +13,6 @@ import type { AwareConfig, DetectedStack, TargetName } from "../types.js";
 interface SyncOptions {
   dryRun: boolean;
 }
-
-// Root-package key for `_meta.fileHashes` / `_meta.fragmentVersions`.
-// Phase 4 will populate per-workspace keys alongside this root entry.
-const ROOT_PACKAGE_KEY = "";
 
 export async function syncCommand(options: SyncOptions): Promise<void> {
   const projectRoot = process.cwd();
@@ -99,7 +96,13 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
   }
 
   if (!options.dryRun) {
-    // Update meta
+    // Update meta. Write-order note: generated files above are written
+    // before `.aware.json` is saved here. Phase 1's drift engine doesn't
+    // read `_meta.fileHashes` (it re-verifies from on-disk content) so a
+    // concurrent `diff` between the two writes sees no inconsistency.
+    // When Phase 4 starts consuming `_meta.fileHashes`, revisit: either
+    // atomic-rename the config or tolerate a brief window where the map
+    // trails the filesystem.
     config._meta.lastSyncedAt = new Date().toISOString();
     config._meta.lastDetectionHash = newHash;
     persistFileHashes(config, writtenHashes);
