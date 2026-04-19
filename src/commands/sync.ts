@@ -5,6 +5,7 @@ import { ROOT_PACKAGE_KEY } from "../diff/index.js";
 import { resolveFragments } from "../fragments/index.js";
 import { generateAll } from "../generators/index.js";
 import { extractStampedHash } from "../core/hash.js";
+import { extractConventions } from "../conventions/extractor.js";
 import { loadConfig, saveConfig, computeDetectionHash } from "../utils/config.js";
 import { readFile, writeFile } from "../utils/fs.js";
 import { log } from "../utils/logger.js";
@@ -51,6 +52,16 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
         (config.stack as unknown as Record<string, unknown>)[key] = detected;
       }
     }
+  }
+
+  // Refresh convention extraction unless the user opted out. We update
+  // only `conventions.extracted` — the top-level `conventions.naming`
+  // etc. are user-authoritative once init has run, and a later sync
+  // must never clobber a hand-edit. Downstream generators read from the
+  // top-level fields as before; `extracted` is for record-keeping and
+  // future drift-against-extracted-conventions detection.
+  if (config.conventions.extract !== false) {
+    config.conventions.extracted = await extractConventions(projectRoot);
   }
 
   // Generate

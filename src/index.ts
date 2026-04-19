@@ -36,6 +36,26 @@ export {
   cleanVersion,
 } from "./utils/parsers.js";
 export {
+  extractConventions,
+  extractNaming,
+  extractTestLayout,
+  extractLayout,
+  sampleProjectFiles,
+} from "./conventions/extractor.js";
+export type {
+  NamingExtraction,
+  NamingStyle,
+} from "./conventions/naming.js";
+export type {
+  TestLayoutExtraction,
+  TestLayout,
+} from "./conventions/tests.js";
+export type {
+  LayoutExtraction,
+  LayoutPattern,
+} from "./conventions/layout.js";
+export type { SampledFiles, SampleOptions } from "./conventions/sample.js";
+export {
   openMarker,
   closeMarker,
   wrapSection,

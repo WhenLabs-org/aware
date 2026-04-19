@@ -75,14 +75,24 @@ export interface ConventionsConfig {
   testing?: Record<string, string>;
   /**
    * Conventions auto-extracted from scanning project source code.
-   * Never overwrites user-authored values in sibling fields.
+   * Never overwrites user-authored values in sibling fields (naming,
+   * imports, ...). Phase 3 populates this on every `sync`; consumers
+   * that want to surface extracted values to the user must read it
+   * explicitly.
    */
   extracted?: ExtractedConventions;
+  /**
+   * Opt out of source-code scanning for convention extraction by
+   * setting to `false`. Useful for monorepos with unusual layouts,
+   * or for users who don't want their code sampled. Default: true.
+   */
+  extract?: boolean;
   [key: string]:
     | Record<string, string>
     | NamingConventions
     | ImportConventions
     | ExtractedConventions
+    | boolean
     | undefined;
 }
 
