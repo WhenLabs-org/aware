@@ -188,21 +188,38 @@ export interface FragmentModule {
   /** Lower = earlier in the rendered output. */
   priority: number;
   /**
-   * Stack predicate; reserved for Phase 2 version-aware resolution.
-   * `stack` accepts a single name or a list — a fragment like Prisma
-   * applies across multiple frameworks.
+   * Stack predicate gating whether the module's `build` runs at all.
+   * The gate is category-scoped: a `framework` fragment with
+   * `stack: "next"` only matches `stack.framework`, not every category
+   * with a `next`-named item.
+   *
+   * - `stack`: single name or list (Prisma applies across many frameworks).
+   * - `variant`: narrows by the detected StackItem.variant
+   *   (e.g. `"app-router"` vs `"pages-router"` for Next.js).
+   * - `versionRange`: major-only semver range. Supported syntax:
+   *     `"*"`, `"15"`, `"^15"` / `"~15"` (both treated as exact major),
+   *     `">=14"`, `"<16"`, `">=14 <16"`, `"14 || 15"`. Unsupported
+   *     operators throw at match time so authors notice.
+   * - `matchUnknown`: when true, a null stack-item version still matches
+   *   (useful as a "default when we can't determine the version"
+   *   fallback — set on the newest fragment in a version-split set).
    */
   appliesTo?: {
     stack?: string | string[];
+    variant?: string | string[];
     versionRange?: string;
+    matchUnknown?: boolean;
   };
   /** Core build function — returns a Fragment or null when not applicable. */
   build: FragmentFunction;
   /** IDs of other fragments this module overrides (plugin override mechanism). */
   replaces?: string[];
   /**
-   * Fragment version; threaded onto the returned `Fragment.version` at
-   * resolve time so Phase 1 drift detection has provenance to work with.
+   * Fragment content version — a tag for this fragment's *guidance*,
+   * not the detected stack's version. Threaded onto `Fragment.version`
+   * at resolve time so Phase 1 drift detection can record "this output
+   * was produced by nextjs-15@15.x". Distinct from StackItem.version,
+   * which is the version of the detected package in the user's project.
    */
   version?: string;
 }

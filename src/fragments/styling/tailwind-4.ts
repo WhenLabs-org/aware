@@ -64,6 +64,9 @@ export const tailwind4Module: FragmentModule = {
   appliesTo: {
     stack: "tailwindcss",
     versionRange: ">=4",
+    // Default to v4 guidance when version can't be determined —
+    // new Tailwind projects are on v4, and v4 is the current major.
+    matchUnknown: true,
   },
   version: "4.x",
   build: buildTailwind4,

@@ -141,4 +141,38 @@ describe("version-aware fragment routing", () => {
     const fw = result.fragments.find((f) => f.id === "nextjs-app-router");
     expect(fw!.version).toBe("15.x");
   });
+
+  it("pages-router still routes to nextjs-pages, not nextjs-14/15", async () => {
+    // Seed without an app/ directory so detector picks pages-router.
+    const deps = { next: "^15.0.0", react: "^19.0.0" };
+    await fs.writeFile(
+      path.join(tmp, "package.json"),
+      JSON.stringify({ name: "fx", dependencies: deps }),
+    );
+    await fs.writeFile(
+      path.join(tmp, "pnpm-lock.yaml"),
+      `lockfileVersion: '9.0'
+importers:
+  .:
+    dependencies:
+      next:
+        specifier: ^15.0.0
+        version: 15.1.2
+      react:
+        specifier: ^19.0.0
+        version: 19.0.0
+`,
+    );
+    // Note: no app/ directory
+
+    const result = await scan({ projectRoot: tmp, detect: true });
+    // The app-router fragments (nextjs-14/15) should NOT fire because
+    // variant is "pages-router". The pages-router fragment should.
+    const appRouter = result.fragments.find((f) => f.id === "nextjs-app-router");
+    const pagesRouter = result.fragments.find(
+      (f) => f.id === "nextjs-pages-router",
+    );
+    expect(appRouter).toBeUndefined();
+    expect(pagesRouter).toBeDefined();
+  });
 });

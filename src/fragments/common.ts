@@ -33,11 +33,17 @@ export function majorEq(item: StackItem | null, major: number): boolean {
 /**
  * Lightweight range predicate. Avoids pulling in semver as a dependency.
  * Supported syntaxes:
- *   - `"*"`           — always matches (including null version)
- *   - `"15"`          — exact major
+ *   - `"*"`                     — always matches (including null version)
+ *   - `"15"`                    — exact major
+ *   - `"^15"` / `"~15"`         — both treated as exact major (we compare
+ *                                 majors only, so caret / tilde collapse)
  *   - `">=15"`, `"<16"`, `">15"`, `"<=16"` — single bound
- *   - `">=14 <16"`    — space-separated bounds (all must hold)
- *   - `"14 || 15"`    — OR, each side evaluated as a sub-range
+ *   - `">=14 <16"`              — space-separated bounds (all must hold)
+ *   - `"14 || 15"`              — OR, each side evaluated as a sub-range
+ *
+ * Unknown operator prefixes throw so fragment authors notice at dev time
+ * instead of shipping a silently-non-matching range. Writing `"~=15"` or
+ * `">==15"` is a typo, not an intent we should silently ignore.
  *
  * Comparisons are on the major version only; this matches the policy that
  * fragments split only when guidance meaningfully differs across majors.
@@ -61,9 +67,18 @@ function evaluateClause(major: number, clause: string): boolean {
   return tokens.length > 0;
 }
 
+// Supported operator prefixes on a version-range token. `^` / `~` collapse
+// to exact-major because versionMatches compares majors only.
+const OP_PATTERN = /^(>=|<=|>|<|=|\^|~)?\s*(\d+)/;
+
 function evaluateToken(major: number, token: string): boolean {
-  const match = token.match(/^(>=|<=|>|<|=)?\s*(\d+)/);
-  if (!match) return false;
+  const match = token.match(OP_PATTERN);
+  if (!match) {
+    throw new Error(
+      `Unsupported version-range token "${token}". Expected one of: ` +
+        `"*", "15", "^15", "~15", ">=15", "<=15", ">15", "<15", or "14 || 15".`,
+    );
+  }
   const op = match[1] ?? "=";
   const target = parseInt(match[2]!, 10);
   switch (op) {
@@ -75,6 +90,8 @@ function evaluateToken(major: number, token: string): boolean {
       return major > target;
     case "<":
       return major < target;
+    case "^":
+    case "~":
     case "=":
       return major === target;
     default:

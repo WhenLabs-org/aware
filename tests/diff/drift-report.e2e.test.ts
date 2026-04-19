@@ -146,6 +146,26 @@ describe("computeDriftReport end-to-end", () => {
     expect(report.contentDrifts.some((d) => d.kind === "stale")).toBe(true);
   });
 
+  it("Phase-2 fragment.version doesn't cause spurious drift on Phase-1 configs", async () => {
+    // Simulate a project synced before Phase 2 introduced per-module
+    // version tags: scan normally, blank out fragmentVersions to mimic
+    // the v1-era state, write files, then run the drift engine.
+    const result = await scan({ projectRoot: tmp, targets, detect: true });
+    result.config._meta.fragmentVersions = {};
+    await saveConfig(tmp, result.config);
+    for (const file of result.generatedFiles) {
+      await fs.writeFile(path.join(tmp, file.path), file.content);
+    }
+
+    const report = await computeDriftReport({
+      projectRoot: tmp,
+      config: result.config,
+    });
+    // The drift engine reads embedded hashes from files, not from
+    // fragmentVersions — an empty map must not register drift.
+    expect(report.severity).toBe("none");
+  });
+
   it("restricts content drift to --target when specified", async () => {
     const allTargets: TargetsConfig = {
       claude: true,

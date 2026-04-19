@@ -10,10 +10,8 @@ function buildNextjs14(
   stack: DetectedStack,
   _config: AwareConfig,
 ): Fragment | null {
+  // appliesTo gate handles framework / version / variant — just build.
   if (!matchesStack(stack.framework, "nextjs")) return null;
-
-  const variant = stack.framework!.variant;
-  if (variant === "pages-router") return null;
 
   return {
     id: "nextjs-app-router",
@@ -70,6 +68,7 @@ export const nextjs14Module: FragmentModule = {
   priority: 10,
   appliesTo: {
     stack: "nextjs",
+    variant: "app-router",
     versionRange: "14",
   },
   version: "14.x",

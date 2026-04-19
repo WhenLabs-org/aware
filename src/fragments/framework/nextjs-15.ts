@@ -10,12 +10,9 @@ function buildNextjs15(
   stack: DetectedStack,
   _config: AwareConfig,
 ): Fragment | null {
-  // `appliesTo` on the module already gates on framework=nextjs and
-  // version>=15, so we only need the variant check here.
+  // The registry's appliesTo gate handles framework=nextjs, version>=15,
+  // and variant=app-router. This function only builds the content.
   if (!matchesStack(stack.framework, "nextjs")) return null;
-
-  const variant = stack.framework!.variant;
-  if (variant === "pages-router") return null;
 
   return {
     id: "nextjs-app-router",
@@ -73,7 +70,12 @@ export const nextjs15Module: FragmentModule = {
   priority: 10,
   appliesTo: {
     stack: "nextjs",
+    variant: "app-router",
     versionRange: ">=15",
+    // Act as the default when the installed version can't be determined
+    // (no lockfile, range like "latest"). Better to hand Next users the
+    // latest guidance than no guidance.
+    matchUnknown: true,
   },
   version: "15.x",
   build: buildNextjs15,

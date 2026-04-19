@@ -164,4 +164,154 @@ describe("FragmentRegistry appliesTo filter", () => {
     const fragments = reg.resolve(emptyStack(), emptyConfig());
     expect(fragments).toHaveLength(1);
   });
+
+  it("matchUnknown: true makes a concrete range match null versions", () => {
+    const reg = new FragmentRegistry();
+    reg.register({
+      ...framework("nextjs-15-default", ">=15"),
+      appliesTo: { stack: "nextjs", versionRange: ">=15", matchUnknown: true },
+    });
+    const fragments = reg.resolve(
+      withFramework("nextjs", null),
+      emptyConfig(),
+    );
+    expect(fragments).toHaveLength(1);
+  });
+
+  it("matchUnknown: true also accepts unparseable version strings like 'latest'", () => {
+    const reg = new FragmentRegistry();
+    reg.register({
+      ...framework("nextjs-15-default", ">=15"),
+      appliesTo: { stack: "nextjs", versionRange: ">=15", matchUnknown: true },
+    });
+    const fragments = reg.resolve(
+      withFramework("nextjs", "latest"),
+      emptyConfig(),
+    );
+    expect(fragments).toHaveLength(1);
+  });
+
+  it("appliesTo.variant narrows matching by detected StackItem.variant", () => {
+    const reg = new FragmentRegistry();
+    reg.register({
+      id: "next-app-only",
+      category: "framework",
+      priority: 10,
+      appliesTo: { stack: "nextjs", variant: "app-router" },
+      build: (): Fragment => ({
+        id: "next-app-only",
+        category: "framework",
+        title: "app-only",
+        content: "x",
+        priority: 10,
+      }),
+    });
+
+    const pages: DetectedStack = {
+      ...emptyStack(),
+      framework: {
+        name: "nextjs",
+        version: "15.0",
+        variant: "pages-router",
+        confidence: 1,
+        detectedFrom: "test",
+      },
+    };
+    expect(reg.resolve(pages, emptyConfig())).toEqual([]);
+
+    const app: DetectedStack = {
+      ...emptyStack(),
+      framework: {
+        name: "nextjs",
+        version: "15.0",
+        variant: "app-router",
+        confidence: 1,
+        detectedFrom: "test",
+      },
+    };
+    expect(reg.resolve(app, emptyConfig())).toHaveLength(1);
+  });
+
+  it("category scoping: stack name only matches fields for that category", () => {
+    // Simulate a pathological case where some other category
+    // coincidentally has an item named "nextjs". A `framework`-category
+    // module with `stack: "nextjs"` should not match it.
+    const reg = new FragmentRegistry();
+    reg.register({
+      ...framework("framework-only", "*"),
+      category: "framework",
+    });
+    const stack: DetectedStack = {
+      ...emptyStack(),
+      bundler: {
+        name: "nextjs",
+        version: "1.0",
+        variant: null,
+        confidence: 1,
+        detectedFrom: "test",
+      },
+    };
+    expect(reg.resolve(stack, emptyConfig())).toEqual([]);
+  });
+
+  it("overlapping appliesTo gates produce a helpful dup-id error", () => {
+    const reg = new FragmentRegistry();
+    // Both manifests match a Next 15 project; both produce the same
+    // output id; neither declares `replaces`. The error should point at
+    // the range overlap, not blame the user's code.
+    reg.register({
+      id: "nextjs-wide",
+      category: "framework",
+      priority: 10,
+      appliesTo: { stack: "nextjs", versionRange: ">=14 <16" },
+      build: (): Fragment => ({
+        id: "nextjs-app-router",
+        category: "framework",
+        title: "wide",
+        content: "x",
+        priority: 10,
+      }),
+    });
+    reg.register({
+      id: "nextjs-narrow",
+      category: "framework",
+      priority: 10,
+      appliesTo: { stack: "nextjs", versionRange: "15" },
+      build: (): Fragment => ({
+        id: "nextjs-app-router",
+        category: "framework",
+        title: "narrow",
+        content: "x",
+        priority: 10,
+      }),
+    });
+
+    expect(() =>
+      reg.resolve(withFramework("nextjs", "15.1"), emptyConfig()),
+    ).toThrow(/appliesTo\.versionRange/);
+  });
+
+  it("versionMatches with caret/tilde collapses to exact major", () => {
+    const reg = new FragmentRegistry();
+    reg.register(framework("caret-15", "^15"));
+    reg.register(framework("tilde-14", "~14"));
+    expect(
+      reg
+        .resolve(withFramework("nextjs", "15.4.0"), emptyConfig())
+        .map((f) => f.title),
+    ).toEqual(["caret-15"]);
+    expect(
+      reg
+        .resolve(withFramework("nextjs", "14.9.0"), emptyConfig())
+        .map((f) => f.title),
+    ).toEqual(["tilde-14"]);
+  });
+
+  it("unknown operators in versionRange throw a helpful error", () => {
+    const reg = new FragmentRegistry();
+    reg.register(framework("typo", "~=15"));
+    expect(() =>
+      reg.resolve(withFramework("nextjs", "15.0"), emptyConfig()),
+    ).toThrow(/Unsupported version-range token/);
+  });
 });

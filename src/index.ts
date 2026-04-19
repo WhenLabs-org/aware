@@ -29,6 +29,13 @@ export {
 export { readLockfile } from "./core/lockfile.js";
 export type { LockfileVersionMap } from "./core/lockfile.js";
 export {
+  parsePackageJson,
+  loadProjectDeps,
+  getDepVersion,
+  getRawDepVersion,
+  cleanVersion,
+} from "./utils/parsers.js";
+export {
   openMarker,
   closeMarker,
   wrapSection,

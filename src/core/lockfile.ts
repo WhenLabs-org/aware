@@ -37,6 +37,13 @@ export async function readLockfile(projectRoot: string): Promise<LockfileVersion
   return new Map();
 }
 
+/**
+ * Parse a pnpm-lock.yaml. Supported: lockfileVersion 6.0+ (pnpm v7+),
+ * which uses the `importers` top-level structure. Earlier pnpm versions
+ * (v5 / v6 with lockfileVersion 5.x) used a different shape entirely
+ * (package keys like `/next/14.2.1` at top-level) and are not supported
+ * — callers get an empty map and fall back to package.json ranges.
+ */
 async function readPnpmLockfile(projectRoot: string): Promise<LockfileVersionMap> {
   const content = await readFile(path.join(projectRoot, "pnpm-lock.yaml"));
   if (!content) return new Map();
@@ -65,18 +72,6 @@ async function readPnpmLockfile(projectRoot: string): Promise<LockfileVersionMap
           const version = extractPnpmVersion(spec);
           if (version) map.set(name, version);
         }
-      }
-    }
-  }
-
-  // pnpm v5/v6 single-root layout used top-level `dependencies` / `devDependencies`.
-  if (map.size === 0) {
-    for (const field of ["dependencies", "devDependencies"] as const) {
-      const deps = parsed[field];
-      if (!isObject(deps)) continue;
-      for (const [name, spec] of Object.entries(deps)) {
-        const version = extractPnpmVersion(spec);
-        if (version) map.set(name, version);
       }
     }
   }
@@ -151,34 +146,34 @@ async function readYarnLockfile(projectRoot: string): Promise<LockfileVersionMap
 
   const map: LockfileVersionMap = new Map();
 
-  // yarn.lock is a custom line-based format. Each entry starts with one
-  // or more quoted `"name@range":` lines, then indented fields. We pair
-  // the first name in the header with the `version` field of its block.
+  // yarn.lock supports two dialects we care about:
+  //   Classic:  "next@^15.1.0":      then    version "15.1.2"
+  //   Berry:    "next@npm:^15.1.0":  then    version: 15.1.2
   //
-  // Example:
-  //   "next@^15.1.0":
-  //     version "15.1.2"
-  //     resolved "..."
+  // Headers may also be unquoted (`react@^19.0.0:`), multi-key
+  // (`"foo@^1, foo@^1.2":`), scoped (`"@types/node@^20":`), or carry a
+  // protocol prefix like `@npm:` (berry's aliased-package syntax).
   //
-  // Supports both Yarn classic and Berry (same version field location).
+  // Approach: detect header vs. indented-field lines by indentation.
+  // For headers, strip the outer quotes/colon and parse the first
+  // `<name>@<range>` pair with a scope-aware regex. For fields, accept
+  // either `version "X"` (classic) or `version: X` (berry).
   const lines = content.split("\n");
   let currentName: string | null = null;
+
   for (const line of lines) {
-    if (!line.startsWith(" ") && !line.startsWith("\t") && line.trim().length > 0) {
-      // Header line. Take the first quoted or unquoted name@range.
-      const match = line.match(/^"?([^@"\s,]+(?:@[^@"\s,]+)?)@[^":,]+/);
-      if (match?.[1]) {
-        currentName = stripScope(match[1]);
-      } else {
-        currentName = null;
-      }
+    const isIndented = line.startsWith(" ") || line.startsWith("\t");
+    const trimmed = line.trim();
+
+    if (!isIndented && trimmed.length > 0 && !trimmed.startsWith("#")) {
+      currentName = parseYarnHeaderName(trimmed);
       continue;
     }
-    if (currentName && /^\s+version\s/.test(line)) {
-      const vm = line.match(/^\s+version\s+"?([^"]+)"?/);
-      if (vm?.[1]) {
-        // Only write the first version we see per entry.
-        if (!map.has(currentName)) map.set(currentName, vm[1]);
+
+    if (currentName && isIndented) {
+      const vm = line.match(/^\s+version[\s:]+"?([^"\s]+)"?/);
+      if (vm?.[1] && !map.has(currentName)) {
+        map.set(currentName, vm[1]);
       }
     }
   }
@@ -186,21 +181,34 @@ async function readYarnLockfile(projectRoot: string): Promise<LockfileVersionMap
   return map;
 }
 
-function stripScope(nameAtRange: string): string {
-  // `nameAtRange` may be like `@babel/core` or `react` (no range since
-  // we matched on `@[^":,]+` already). Regex was greedy — try once more
-  // to strip trailing range if present.
-  const at = nameAtRange.lastIndexOf("@");
-  if (at > 0) {
-    // Example: `@babel/core` → idx > 0, but that's the scope marker we
-    // want to keep. Distinguish scope (`@foo/bar`) from range (`foo@1.x`).
-    const before = nameAtRange.slice(0, at);
-    const after = nameAtRange.slice(at + 1);
-    if (/^\d/.test(after) || after.startsWith("^") || after.startsWith("~")) {
-      return before;
-    }
-  }
-  return nameAtRange;
+/**
+ * Extract the dependency name from a yarn.lock header line.
+ * Header forms this recognizes:
+ *   react@^19.0.0:
+ *   "next@^15.1.0":
+ *   "next@npm:^15.1.0":
+ *   "@types/node@^20":
+ *   "foo@^1.0, foo@^1.2":
+ * Berry's `__metadata:` header is intentionally rejected (no `@` in
+ * its key) so it doesn't leak in as a bogus package.
+ */
+function parseYarnHeaderName(headerLine: string): string | null {
+  // Strip outer quotes and trailing colon.
+  let s = headerLine.replace(/:$/, "").trim();
+  if (s.startsWith('"') && s.endsWith('"')) s = s.slice(1, -1);
+
+  // Take the first key before any comma (multi-key headers).
+  const firstKey = s.split(",")[0]?.trim();
+  if (!firstKey) return null;
+
+  // Scoped: `@scope/name@range`. Non-scoped: `name@range`.
+  // The `@` separating name from range is the LAST `@` in the key for
+  // scoped packages (because the scope also starts with `@`), or the
+  // only `@` for non-scoped. `lastIndexOf` works for both.
+  const atIdx = firstKey.lastIndexOf("@");
+  if (atIdx <= 0) return null; // no range separator, or bare `@` at start
+  const name = firstKey.slice(0, atIdx);
+  return name.length > 0 ? name : null;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

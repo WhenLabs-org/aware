@@ -4,7 +4,7 @@ import * as dotenvParser from "dotenv";
 import { readFile } from "./fs.js";
 import * as path from "node:path";
 import type { PackageJson } from "../types.js";
-import type { LockfileVersionMap } from "../core/lockfile.js";
+import { readLockfile, type LockfileVersionMap } from "../core/lockfile.js";
 
 export async function parsePackageJson(projectRoot: string): Promise<PackageJson | null> {
   const content = await readFile(path.join(projectRoot, "package.json"));
@@ -25,7 +25,6 @@ export async function parsePackageJson(projectRoot: string): Promise<PackageJson
 export async function loadProjectDeps(
   projectRoot: string,
 ): Promise<{ pkg: PackageJson | null; lockfile: LockfileVersionMap }> {
-  const { readLockfile } = await import("../core/lockfile.js");
   const [pkg, lockfile] = await Promise.all([
     parsePackageJson(projectRoot),
     readLockfile(projectRoot),
