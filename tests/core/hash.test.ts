@@ -20,6 +20,10 @@ describe("normalizeForHash", () => {
   it("collapses multiple trailing newlines to one", () => {
     expect(normalizeForHash("hi\n\n\n")).toBe("hi\n");
   });
+
+  it("ensures exactly one trailing newline even when input had none", () => {
+    expect(normalizeForHash("hi")).toBe("hi\n");
+  });
 });
 
 describe("hashContent", () => {
@@ -35,6 +39,18 @@ describe("hashContent", () => {
 
   it("distinguishes different content", () => {
     expect(hashContent("a")).not.toBe(hashContent("b"));
+  });
+
+  it("strips the hash comment before hashing", () => {
+    const withHash = `body\n<!-- ${HASH_MARKER_PREFIX}abc123 -->\n`;
+    const withoutHash = "body\n";
+    expect(hashContent(withHash)).toBe(hashContent(withoutHash));
+  });
+
+  it("is immune to whitespace drift inside the hash comment", () => {
+    const a = `body\n<!-- ${HASH_MARKER_PREFIX}abc123 -->\n`;
+    const b = `body\n<!--   ${HASH_MARKER_PREFIX}abc123   -->\n`;
+    expect(hashContent(a)).toBe(hashContent(b));
   });
 });
 
@@ -74,5 +90,28 @@ describe("stampHash / verifyStampedHash round trip", () => {
 
     const crlf = stamped.replace(/\n/g, "\r\n");
     expect(verifyStampedHash(crlf).matches).toBe(true);
+  });
+
+  it("ignores whitespace changes *inside* the hash comment itself", () => {
+    const template = `# doc\nhello\n<!-- ${HASH_MARKER_PREFIX}${HASH_PLACEHOLDER} -->\n`;
+    const stamped = stampHash(template);
+
+    // Simulate a markdown formatter reflowing whitespace inside the comment.
+    const reflowed = stamped.replace(
+      new RegExp(`<!--\\s*${HASH_MARKER_PREFIX}([a-f0-9]+)\\s*-->`),
+      (_, digest) => `<!--   ${HASH_MARKER_PREFIX}${digest}   -->`,
+    );
+    expect(verifyStampedHash(reflowed).matches).toBe(true);
+  });
+
+  it("throws if the placeholder is missing", () => {
+    expect(() => stampHash("no placeholder here")).toThrow(/missing/);
+  });
+
+  it("throws if the placeholder appears more than once", () => {
+    const doubled =
+      `<!-- ${HASH_MARKER_PREFIX}${HASH_PLACEHOLDER} -->\n` +
+      `<!-- ${HASH_MARKER_PREFIX}${HASH_PLACEHOLDER} -->`;
+    expect(() => stampHash(doubled)).toThrow(/exactly 1/);
   });
 });

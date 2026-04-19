@@ -188,4 +188,6 @@ export function resolveFragments(
   return defaultRegistry.resolve(stack, config);
 }
 
-export { defaultRegistry, FragmentRegistry } from "./registry.js";
+// Registry internals (FragmentRegistry, defaultRegistry) intentionally
+// not re-exported at module boundary — Phase 5 will settle the plugin
+// API surface. Tests import directly from "./registry.js".

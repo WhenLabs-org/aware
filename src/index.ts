@@ -16,12 +16,7 @@ export type {
   TargetName,
   GeneratorResult,
 } from "./types.js";
-export {
-  FragmentRegistry,
-  defaultRegistry,
-  registerFragmentModule,
-  resolveFragments,
-} from "./fragments/index.js";
+export { registerFragmentModule, resolveFragments } from "./fragments/index.js";
 export { versionMatches, majorVersion, majorEq } from "./fragments/common.js";
 export { migrate } from "./schema/migrate.js";
 export {
@@ -31,4 +26,18 @@ export {
   verifyStampedHash,
   normalizeForHash,
 } from "./core/hash.js";
-export { openMarker, closeMarker, wrapSection, parseSections } from "./core/markers.js";
+export {
+  openMarker,
+  closeMarker,
+  wrapSection,
+  parseSections,
+  findSectionIssues,
+  footerWithPlaceholder,
+} from "./core/markers.js";
+export type { ParsedSection, SectionIssue, SectionIssueKind } from "./core/markers.js";
+export {
+  SECTION_MARKER_PREFIX,
+  SECTION_CUSTOM_TOKEN,
+  HASH_MARKER_PREFIX,
+  HASH_PLACEHOLDER,
+} from "./constants.js";

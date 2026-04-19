@@ -64,4 +64,16 @@ describe("versionMatches", () => {
     expect(majorEq(item("15.3"), 15)).toBe(true);
     expect(majorEq(item("14"), 15)).toBe(false);
   });
+
+  it("handles pre-release suffixes by major", () => {
+    expect(majorVersion(item("15.0.0-rc.1"))).toBe(15);
+    expect(versionMatches(item("15.0.0-rc.1"), ">=15")).toBe(true);
+  });
+
+  it("handles 0.x versions correctly", () => {
+    expect(majorVersion(item("0.34.1"))).toBe(0);
+    expect(versionMatches(item("0.34.1"), "0")).toBe(true);
+    expect(versionMatches(item("0.34.1"), ">=1")).toBe(false);
+    expect(versionMatches(item("1.0.0"), ">=1")).toBe(true);
+  });
 });

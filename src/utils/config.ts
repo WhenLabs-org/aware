@@ -13,11 +13,15 @@ export interface LoadedConfig {
 
 /**
  * Load and (if needed) migrate a `.aware.json` to the current schema.
- * Returns null only when the file is absent or unparseable.
  *
- * Callers that just want the config can use `loadConfig`; callers that need
- * to know whether a migration happened (so they can nudge the user to
- * re-sync) should use `loadConfigWithMeta`.
+ * Return semantics:
+ *   - `null`            — file absent, or present but malformed JSON.
+ *   - throws            — file present and parseable, but migration failed
+ *                         (future schema version, corrupt v1 shape, etc.).
+ *
+ * Callers used to get `null` for *any* failure, which silently dropped data.
+ * Migration errors are now surfaced so `aware init` doesn't accidentally
+ * overwrite a broken-but-recoverable config.
  */
 export async function loadConfigWithMeta(
   projectRoot: string,
@@ -31,11 +35,7 @@ export async function loadConfigWithMeta(
   } catch {
     return null;
   }
-  try {
-    return migrate(raw);
-  } catch {
-    return null;
-  }
+  return migrate(raw);
 }
 
 export async function loadConfig(projectRoot: string): Promise<AwareConfig | null> {

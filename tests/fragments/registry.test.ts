@@ -7,8 +7,8 @@ import type {
   FragmentModule,
 } from "../../src/types.js";
 
-function stub(id: string, priority = 10): FragmentModule {
-  return {
+function stub(id: string, priority = 10, version?: string): FragmentModule {
+  const mod: FragmentModule = {
     id,
     category: "framework",
     priority,
@@ -20,6 +20,8 @@ function stub(id: string, priority = 10): FragmentModule {
       priority,
     }),
   };
+  if (version !== undefined) mod.version = version;
+  return mod;
 }
 
 function emptyStack(): DetectedStack {
@@ -96,6 +98,30 @@ describe("FragmentRegistry", () => {
     expect(fragments.map((f) => f.id)).toEqual(["plugin-override"]);
   });
 
+  it("allows a module to take a colliding id if it declares `replaces` for it", () => {
+    const reg = new FragmentRegistry();
+    reg.register(stub("core"));
+    const override: FragmentModule = {
+      id: "core",
+      category: "framework",
+      priority: 5,
+      replaces: ["core"],
+      build: (): Fragment => ({
+        id: "core",
+        category: "framework",
+        title: "overridden",
+        content: "overridden",
+        priority: 5,
+      }),
+    };
+    // Registering should succeed because the new module explicitly replaces
+    // the existing one. Resolution picks the overriding module's output.
+    expect(() => reg.register(override)).not.toThrow();
+    const fragments = reg.resolve(emptyStack(), emptyConfig());
+    expect(fragments).toHaveLength(1);
+    expect(fragments[0]!.content).toBe("overridden");
+  });
+
   it("skips modules that return null", () => {
     const reg = new FragmentRegistry();
     reg.register({
@@ -121,5 +147,65 @@ describe("FragmentRegistry", () => {
     const fragments = reg.resolve(emptyStack(), emptyConfig());
     expect(fragments).toHaveLength(1);
     expect(fragments[0]!.id).toBe("legacy");
+  });
+
+  it("throws at resolve time when two legacy fragments produce the same id", () => {
+    const reg = new FragmentRegistry();
+    const sameIdFragment = (): Fragment => ({
+      id: "clash",
+      category: "framework",
+      title: "clash",
+      content: "x",
+      priority: 10,
+    });
+    reg.registerLegacy(sameIdFragment);
+    reg.registerLegacy(sameIdFragment);
+    expect(() => reg.resolve(emptyStack(), emptyConfig())).toThrow(
+      /collision at resolve time/,
+    );
+  });
+
+  it("throws at resolve time when a legacy fragment collides with a manifest fragment", () => {
+    const reg = new FragmentRegistry();
+    reg.register(stub("shared"));
+    reg.registerLegacy(
+      (): Fragment => ({
+        id: "shared",
+        category: "framework",
+        title: "shared",
+        content: "y",
+        priority: 10,
+      }),
+    );
+    expect(() => reg.resolve(emptyStack(), emptyConfig())).toThrow(
+      /collision at resolve time/,
+    );
+  });
+
+  it("threads module.version onto the returned Fragment.version", () => {
+    const reg = new FragmentRegistry();
+    reg.register(stub("with-version", 10, "1.2.3"));
+    const fragments = reg.resolve(emptyStack(), emptyConfig());
+    expect(fragments[0]!.version).toBe("1.2.3");
+  });
+
+  it("does not overwrite a Fragment.version set by the build function", () => {
+    const reg = new FragmentRegistry();
+    reg.register({
+      id: "explicit",
+      category: "framework",
+      priority: 10,
+      version: "ignored",
+      build: (): Fragment => ({
+        id: "explicit",
+        category: "framework",
+        title: "explicit",
+        content: "x",
+        priority: 10,
+        version: "explicit-version",
+      }),
+    });
+    const fragments = reg.resolve(emptyStack(), emptyConfig());
+    expect(fragments[0]!.version).toBe("explicit-version");
   });
 });

@@ -42,7 +42,7 @@ export class CopilotGenerator extends BaseGenerator {
     for (const fragment of context.fragmentSections) {
       if (fragment.content) {
         const trimmed = trimFragment(fragment.content, 5);
-        blocks.push(this.wrapSection(`fragment.${fragment.id}`, trimmed));
+        blocks.push(this.wrapSection(`fragment/${fragment.id}`, trimmed));
       }
     }
 

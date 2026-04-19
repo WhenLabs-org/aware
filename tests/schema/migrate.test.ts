@@ -64,4 +64,28 @@ describe("migrate v1 -> v2", () => {
   it("throws on non-object input", () => {
     expect(() => migrate("not an object")).toThrow(/object/);
   });
+
+  it("throws on array input", () => {
+    expect(() => migrate([1, 2, 3])).toThrow(/object/);
+  });
+
+  it("throws on an object that is neither v1-shaped nor has a version", () => {
+    expect(() => migrate({ random: "junk" })).toThrow(/not recognizable/);
+  });
+
+  it("accepts a versionless object if it has the v1 shape", () => {
+    const versionless = { ...v1Sample } as Record<string, unknown>;
+    delete versionless.version;
+    const { config, migrated, fromVersion } = migrate(versionless);
+    expect(fromVersion).toBe(1);
+    expect(migrated).toBe(true);
+    expect(config.version).toBe(SCHEMA_VERSION);
+  });
+
+  it("does not alias _meta back into the caller's object", () => {
+    const input = JSON.parse(JSON.stringify(v1Sample));
+    const { config } = migrate(input);
+    config._meta.fileHashes = { "": { claude: "abc" } };
+    expect((input._meta as Record<string, unknown>).fileHashes).toBeUndefined();
+  });
 });

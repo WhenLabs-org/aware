@@ -121,10 +121,23 @@ export interface ConfigMeta {
   lastSyncedAt: string | null;
   lastDetectionHash: string;
   awareVersion: string;
-  /** Hash of each generated file as of last sync, keyed by target. Used to detect hand-edits. */
-  fileHashes?: Partial<Record<TargetName, string>>;
-  /** Versions of fragments that produced each generated file at last sync. */
-  fragmentVersions?: Partial<Record<TargetName, Record<string, string>>>;
+  /**
+   * Per-file content hashes as of the last `sync`, used by Phase 1 to
+   * detect hand-edits. Shape:
+   *   { [packagePath]: { [target]: hash } }
+   * The outer key is a package path relative to the repo root; the empty
+   * string `""` is the root / single-package case. Phase 4 populates
+   * per-package keys when the project is a monorepo.
+   */
+  fileHashes?: Record<string, Partial<Record<TargetName, string>>>;
+  /**
+   * Provenance map: which fragment@version produced each target's output
+   * at the last sync. Same outer-key convention as `fileHashes`.
+   */
+  fragmentVersions?: Record<
+    string,
+    Partial<Record<TargetName, Record<string, string>>>
+  >;
 }
 
 // ---- Fragment / Generation types ----
@@ -135,6 +148,12 @@ export interface Fragment {
   title: string;
   content: string;
   priority: number;
+  /**
+   * Fragment version, populated from the owning `FragmentModule.version`
+   * at resolve time. Used by Phase 1 drift detection to answer
+   * "which fragment@version produced this output?".
+   */
+  version?: string;
 }
 
 export type FragmentCategory =
@@ -168,16 +187,23 @@ export interface FragmentModule {
   category: FragmentCategory;
   /** Lower = earlier in the rendered output. */
   priority: number;
-  /** Stack predicate; reserved for Phase 2 version-aware resolution. */
+  /**
+   * Stack predicate; reserved for Phase 2 version-aware resolution.
+   * `stack` accepts a single name or a list — a fragment like Prisma
+   * applies across multiple frameworks.
+   */
   appliesTo?: {
-    stack?: string;
+    stack?: string | string[];
     versionRange?: string;
   };
   /** Core build function — returns a Fragment or null when not applicable. */
   build: FragmentFunction;
   /** IDs of other fragments this module overrides (plugin override mechanism). */
   replaces?: string[];
-  /** Fragment version, used by Phase 1 drift detection for provenance. */
+  /**
+   * Fragment version; threaded onto the returned `Fragment.version` at
+   * resolve time so Phase 1 drift detection has provenance to work with.
+   */
   version?: string;
 }
 

@@ -18,7 +18,7 @@ export class ClaudeGenerator extends BaseGenerator {
 
     for (const fragment of context.fragmentSections) {
       if (fragment.content) {
-        blocks.push(this.wrapSection(`fragment.${fragment.id}`, fragment.content));
+        blocks.push(this.wrapSection(`fragment/${fragment.id}`, fragment.content));
       }
     }
 

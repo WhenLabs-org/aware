@@ -9,7 +9,16 @@ import {
  * Section marker helpers. Markers are HTML comments so they're invisible in
  * rendered markdown but trivially machine-readable by the diff engine
  * (Phase 1) and preservation logic (custom sections survive sync).
+ *
+ * Section IDs accept alphanumerics plus `-`, `_`, `.`, and `/`. We use `/`
+ * as the composed-id separator (e.g. `fragment/nextjs-15`) because `.` is
+ * legal inside fragment ids (e.g. version numbers) and splitting on `.`
+ * would be ambiguous.
  */
+
+// Colons are reserved for the `:end` suffix so open/close markers can
+// never alias each other, even for ids containing dots or slashes.
+const SECTION_ID_PATTERN = "[a-zA-Z0-9_./\\-]+";
 
 export function openMarker(id: string, mode?: "custom"): string {
   const suffix = mode === "custom" ? ` ${SECTION_CUSTOM_TOKEN}` : "";
@@ -35,13 +44,20 @@ export function footerWithPlaceholder(): string {
   ].join("\n");
 }
 
-// Section IDs are alphanumeric plus `-` / `_` / `.` — colons are reserved for
-// the `:end` suffix so open/close markers can never alias each other.
-const SECTION_ID_PATTERN = "[a-zA-Z0-9_.\\-]+";
 const SECTION_BLOCK_RE = new RegExp(
   `<!--\\s*${SECTION_MARKER_PREFIX}(${SECTION_ID_PATTERN})(?:\\s+(${SECTION_CUSTOM_TOKEN}))?\\s*-->` +
     `([\\s\\S]*?)` +
     `<!--\\s*${SECTION_MARKER_PREFIX}\\1:end\\s*-->`,
+  "g",
+);
+
+// Used by the validator to find all open/close markers in the document.
+const OPEN_MARKER_RE = new RegExp(
+  `<!--\\s*${SECTION_MARKER_PREFIX}(${SECTION_ID_PATTERN})(?:\\s+(${SECTION_CUSTOM_TOKEN}))?\\s*-->`,
+  "g",
+);
+const CLOSE_MARKER_RE = new RegExp(
+  `<!--\\s*${SECTION_MARKER_PREFIX}(${SECTION_ID_PATTERN}):end\\s*-->`,
   "g",
 );
 
@@ -56,8 +72,10 @@ export interface ParsedSection {
 }
 
 /**
- * Parse all section blocks from generated content. Used by Phase 1 to
- * localize hand-edits (diff per section) and preserve `custom` sections.
+ * Flat parse of section blocks. Intended for the common case of well-formed
+ * generator output. For analysis of potentially-broken files (e.g. the Phase 1
+ * drift engine reading on-disk content), pair this with `findSectionIssues`
+ * which reports duplicate ids, nested sections, and orphan markers.
  */
 export function parseSections(content: string): ParsedSection[] {
   const sections: ParsedSection[] = [];
@@ -73,4 +91,103 @@ export function parseSections(content: string): ParsedSection[] {
     });
   }
   return sections;
+}
+
+export type SectionIssueKind =
+  | "duplicate-id"
+  | "nested-section"
+  | "orphan-open"
+  | "orphan-close";
+
+export interface SectionIssue {
+  kind: SectionIssueKind;
+  id: string;
+  offset: number;
+  message: string;
+}
+
+/**
+ * Detect structural problems in section markers: duplicate ids, nested
+ * sections (a section id appearing inside another section's body), and
+ * orphan open/close markers with no matching partner. Returns an empty
+ * array when content is well-formed.
+ *
+ * The drift engine (Phase 1) uses this to decide whether it can safely
+ * attribute hand-edits at the section level or has to fall back to a
+ * file-level verdict.
+ */
+export function findSectionIssues(content: string): SectionIssue[] {
+  const issues: SectionIssue[] = [];
+
+  // Collect all open and close markers with offsets.
+  const opens: Array<{ id: string; offset: number; length: number }> = [];
+  const closes: Array<{ id: string; offset: number; length: number }> = [];
+
+  for (const re of [OPEN_MARKER_RE, CLOSE_MARKER_RE]) {
+    const pattern = new RegExp(re.source, "g");
+    let m: RegExpExecArray | null;
+    while ((m = pattern.exec(content)) !== null) {
+      const entry = { id: m[1]!, offset: m.index, length: m[0].length };
+      if (re === OPEN_MARKER_RE) opens.push(entry);
+      else closes.push(entry);
+    }
+  }
+
+  // Walk in document order, maintaining a stack. Nested same-id-or-other
+  // sections push; close markers pop their matching partner.
+  const timeline = [
+    ...opens.map((o) => ({ type: "open" as const, ...o })),
+    ...closes.map((c) => ({ type: "close" as const, ...c })),
+  ].sort((a, b) => a.offset - b.offset);
+
+  const stack: Array<{ id: string; offset: number }> = [];
+  const seenIds = new Set<string>();
+
+  for (const ev of timeline) {
+    if (ev.type === "open") {
+      if (stack.length > 0) {
+        issues.push({
+          kind: "nested-section",
+          id: ev.id,
+          offset: ev.offset,
+          message: `Section "${ev.id}" is nested inside "${stack[stack.length - 1]!.id}"`,
+        });
+      }
+      if (seenIds.has(ev.id)) {
+        issues.push({
+          kind: "duplicate-id",
+          id: ev.id,
+          offset: ev.offset,
+          message: `Duplicate section id "${ev.id}" (already opened earlier in the file)`,
+        });
+      }
+      seenIds.add(ev.id);
+      stack.push({ id: ev.id, offset: ev.offset });
+    } else {
+      const top = stack[stack.length - 1];
+      if (!top || top.id !== ev.id) {
+        issues.push({
+          kind: "orphan-close",
+          id: ev.id,
+          offset: ev.offset,
+          message: top
+            ? `Close marker "${ev.id}:end" does not match currently-open "${top.id}"`
+            : `Close marker "${ev.id}:end" has no matching open`,
+        });
+        continue;
+      }
+      stack.pop();
+    }
+  }
+
+  for (const leftover of stack) {
+    issues.push({
+      kind: "orphan-open",
+      id: leftover.id,
+      offset: leftover.offset,
+      message: `Section "${leftover.id}" was opened but never closed`,
+    });
+  }
+
+  return issues;
 }
