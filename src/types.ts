@@ -37,6 +37,10 @@ export interface AwareConfig {
   structure: Record<string, string>;
   targets: TargetsConfig;
   _meta: ConfigMeta;
+  /** Optional path to another .aware.json whose fields this config inherits (monorepo use). */
+  extends?: string;
+  /** Optional workspace member globs for monorepo roots. */
+  packages?: string[];
 }
 
 export interface ProjectMeta {
@@ -69,7 +73,26 @@ export interface ConventionsConfig {
   components?: Record<string, string>;
   api?: Record<string, string>;
   testing?: Record<string, string>;
-  [key: string]: Record<string, string> | NamingConventions | ImportConventions | undefined;
+  /**
+   * Conventions auto-extracted from scanning project source code.
+   * Never overwrites user-authored values in sibling fields.
+   */
+  extracted?: ExtractedConventions;
+  [key: string]:
+    | Record<string, string>
+    | NamingConventions
+    | ImportConventions
+    | ExtractedConventions
+    | undefined;
+}
+
+export interface ExtractedConventions {
+  naming?: NamingConventions;
+  imports?: ImportConventions;
+  tests?: Record<string, string>;
+  layout?: Record<string, string>;
+  _confidence?: Record<string, number>;
+  _sampleSize?: number;
 }
 
 export interface NamingConventions {
@@ -98,6 +121,10 @@ export interface ConfigMeta {
   lastSyncedAt: string | null;
   lastDetectionHash: string;
   awareVersion: string;
+  /** Hash of each generated file as of last sync, keyed by target. Used to detect hand-edits. */
+  fileHashes?: Partial<Record<TargetName, string>>;
+  /** Versions of fragments that produced each generated file at last sync. */
+  fragmentVersions?: Partial<Record<TargetName, Record<string, string>>>;
 }
 
 // ---- Fragment / Generation types ----
@@ -128,6 +155,31 @@ export type FragmentFunction = (
   stack: DetectedStack,
   config: AwareConfig,
 ) => Fragment | null;
+
+/**
+ * Declarative fragment manifest. Phase 0 introduces this alongside the legacy
+ * `FragmentFunction` shape; the registry accepts either form. Later phases
+ * migrate fragments to full manifests (version-range resolution, plugin
+ * replacement, etc.).
+ */
+export interface FragmentModule {
+  /** Stable identifier used for deduplication, `replaces`, and telemetry. */
+  id: string;
+  category: FragmentCategory;
+  /** Lower = earlier in the rendered output. */
+  priority: number;
+  /** Stack predicate; reserved for Phase 2 version-aware resolution. */
+  appliesTo?: {
+    stack?: string;
+    versionRange?: string;
+  };
+  /** Core build function — returns a Fragment or null when not applicable. */
+  build: FragmentFunction;
+  /** IDs of other fragments this module overrides (plugin override mechanism). */
+  replaces?: string[];
+  /** Fragment version, used by Phase 1 drift detection for provenance. */
+  version?: string;
+}
 
 export interface ComposedContext {
   projectSection: string;

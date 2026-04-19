@@ -3,7 +3,9 @@ import type {
   AwareConfig,
   Fragment,
   FragmentFunction,
+  FragmentModule,
 } from "../types.js";
+import { FragmentRegistry, defaultRegistry } from "./registry.js";
 
 // Framework fragments
 import { nextjs15Fragment } from "./framework/nextjs-15.js";
@@ -155,20 +157,35 @@ const allFragmentFunctions: FragmentFunction[] = [
   gitlabCiFragment,
 ];
 
+// Wrap each legacy fragment function as a FragmentModule. The legacy shape
+// carries id/category/priority inside the returned Fragment, so the
+// registry's legacy adapter runs the function and trusts the returned object.
+// Full migration to FragmentModule manifests happens in Phase 2.
+let coreRegistered = false;
+function registerCoreFragments(registry: FragmentRegistry): void {
+  for (const fn of allFragmentFunctions) {
+    registry.registerLegacy(fn);
+  }
+}
+
+function ensureCoreRegistered(): void {
+  if (coreRegistered) return;
+  registerCoreFragments(defaultRegistry);
+  coreRegistered = true;
+}
+
+/** Register a fragment module (core or plugin) with the default registry. */
+export function registerFragmentModule(module: FragmentModule): void {
+  ensureCoreRegistered();
+  defaultRegistry.register(module);
+}
+
 export function resolveFragments(
   stack: DetectedStack,
   config: AwareConfig,
 ): Fragment[] {
-  const fragments: Fragment[] = [];
-
-  for (const fn of allFragmentFunctions) {
-    const result = fn(stack, config);
-    if (result !== null) {
-      fragments.push(result);
-    }
-  }
-
-  fragments.sort((a, b) => a.priority - b.priority);
-
-  return fragments;
+  ensureCoreRegistered();
+  return defaultRegistry.resolve(stack, config);
 }
+
+export { defaultRegistry, FragmentRegistry } from "./registry.js";
