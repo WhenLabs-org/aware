@@ -56,6 +56,18 @@ export type {
 } from "./conventions/layout.js";
 export type { SampledFiles, SampleOptions } from "./conventions/sample.js";
 export {
+  discoverWorkspace,
+  resolvePackageConfig,
+  scanMonorepo,
+  computeExtendsPath,
+} from "./monorepo/index.js";
+export type {
+  DiscoveredPackage,
+  WorkspaceDiscovery,
+  ResolvedPackageConfig,
+  MonorepoScanResult,
+} from "./monorepo/index.js";
+export {
   openMarker,
   closeMarker,
   wrapSection,

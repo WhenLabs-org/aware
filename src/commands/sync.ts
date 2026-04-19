@@ -6,6 +6,7 @@ import { resolveFragments } from "../fragments/index.js";
 import { generateAll } from "../generators/index.js";
 import { extractStampedHash } from "../core/hash.js";
 import { extractConventions } from "../conventions/extractor.js";
+import { discoverWorkspace, resolvePackageConfig } from "../monorepo/index.js";
 import { loadConfig, saveConfig, computeDetectionHash } from "../utils/config.js";
 import { readFile, writeFile } from "../utils/fs.js";
 import { log } from "../utils/logger.js";
@@ -31,6 +32,57 @@ export async function syncCommand(options: SyncOptions): Promise<void> {
     log.error("No .aware.json found. Run `aware init` first.");
     process.exit(1);
   }
+
+  // Monorepo: root declares `packages`, iterate each package.
+  // A package's `.aware.json` typically `extends` the root, so its
+  // resolved config inherits shared rules/targets/conventions.
+  if (config.packages && config.packages.length > 0) {
+    await syncMonorepo(projectRoot, options);
+    return;
+  }
+
+  await syncSingle(projectRoot, config, options);
+}
+
+async function syncMonorepo(
+  projectRoot: string,
+  options: SyncOptions,
+): Promise<void> {
+  const discovery = await discoverWorkspace(projectRoot);
+  if (!discovery.isMonorepo) {
+    log.error(
+      "Root .aware.json declares `packages` but no workspace declaration " +
+        "was found (pnpm-workspace.yaml / package.json#workspaces / lerna.json).",
+    );
+    process.exit(1);
+  }
+
+  log.info(
+    `Syncing ${discovery.packages.length} package(s) (via ${discovery.source}).`,
+  );
+  for (const pkg of discovery.packages) {
+    const resolved = await resolvePackageConfig(pkg.absolutePath).catch(
+      (err) => {
+        log.error(`${pkg.relativePath}: ${(err as Error).message}`);
+        return null;
+      },
+    );
+    if (!resolved) {
+      log.warn(
+        `${pkg.relativePath}: no .aware.json — run \`aware init\` inside the package or re-run \`aware init --workspace\` at the root.`,
+      );
+      continue;
+    }
+    log.header(`\n${pkg.relativePath}`);
+    await syncSingle(pkg.absolutePath, resolved.config, options);
+  }
+}
+
+async function syncSingle(
+  projectRoot: string,
+  config: AwareConfig,
+  options: SyncOptions,
+): Promise<void> {
 
   // Re-detect stack
   const spinner = ora("Detecting current stack...").start();

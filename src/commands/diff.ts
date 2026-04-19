@@ -1,11 +1,15 @@
 import chalk from "chalk";
-import { computeDriftReport, exitCodeFor } from "../diff/index.js";
+import { computeDriftReport, exitCodeFor, type DriftSeverity } from "../diff/index.js";
 import type { DriftReport, ContentDrift, StackDrift } from "../diff/index.js";
+import {
+  discoverWorkspace,
+  resolvePackageConfig,
+} from "../monorepo/index.js";
 import { loadConfig } from "../utils/config.js";
 import { log, setSilent } from "../utils/logger.js";
 import { confirm } from "../utils/prompts.js";
 import { syncCommand } from "./sync.js";
-import type { TargetName } from "../types.js";
+import type { AwareConfig, TargetName } from "../types.js";
 
 interface DiffOptions {
   /**
@@ -39,6 +43,27 @@ export async function diffCommand(options: DiffOptions = {}): Promise<void> {
   if (!config) {
     log.error("No .aware.json found. Run `aware init` first.");
     process.exit(1);
+  }
+
+  // Monorepo: root declares `packages`. Iterate each package and
+  // aggregate into a single report so `--check` / `--json` stay
+  // usable in CI.
+  if (config.packages && config.packages.length > 0) {
+    const report = await computeMonorepoDriftReport(projectRoot, options.target);
+    if (options.json) {
+      console.log(JSON.stringify(report, null, 2));
+      if (options.check) {
+        process.exit(exitCodeFor(report.severity));
+        return;
+      }
+      return;
+    }
+    renderReport(report, config._meta.lastSyncedAt);
+    if (options.check) {
+      process.exit(exitCodeFor(report.severity));
+      return;
+    }
+    return;
   }
 
   const report = await computeDriftReport({
@@ -176,6 +201,75 @@ function renderSummary(report: DriftReport): void {
     log.warn(`Summary: ${summary}`);
   }
   log.dim("Run `aware sync` to reconcile.");
+}
+
+/**
+ * Build a single `DriftReport` that covers every package in a monorepo.
+ * Per-package drifts carry their `packagePath` so the `--json` consumer
+ * can still localize; severity is the max across packages so one
+ * tampered file in one package is enough to fail CI.
+ */
+async function computeMonorepoDriftReport(
+  projectRoot: string,
+  target: TargetName | undefined,
+): Promise<DriftReport> {
+  const discovery = await discoverWorkspace(projectRoot);
+  if (!discovery.isMonorepo) {
+    // Root declares packages but discovery found none — surface as an
+    // empty, clean report rather than crashing. Doctor will flag the
+    // misconfiguration separately.
+    return {
+      stackDrifts: [],
+      contentDrifts: [],
+      severity: "none",
+      hasStackDrift: false,
+      hasContentDrift: false,
+      hasTamper: false,
+    };
+  }
+
+  const aggregate: DriftReport = {
+    stackDrifts: [],
+    contentDrifts: [],
+    severity: "none",
+    hasStackDrift: false,
+    hasContentDrift: false,
+    hasTamper: false,
+  };
+
+  for (const pkg of discovery.packages) {
+    let resolved: AwareConfig | null;
+    try {
+      const r = await resolvePackageConfig(pkg.absolutePath);
+      resolved = r?.config ?? null;
+    } catch {
+      resolved = null;
+    }
+    if (!resolved) continue;
+
+    const pkgReport = await computeDriftReport({
+      projectRoot: pkg.absolutePath,
+      config: resolved,
+      packagePath: pkg.relativePath,
+      ...(target ? { target } : {}),
+    });
+
+    aggregate.stackDrifts.push(...pkgReport.stackDrifts);
+    aggregate.contentDrifts.push(...pkgReport.contentDrifts);
+    aggregate.hasStackDrift =
+      aggregate.hasStackDrift || pkgReport.hasStackDrift;
+    aggregate.hasContentDrift =
+      aggregate.hasContentDrift || pkgReport.hasContentDrift;
+    aggregate.hasTamper = aggregate.hasTamper || pkgReport.hasTamper;
+    aggregate.severity = maxSeverity(aggregate.severity, pkgReport.severity);
+  }
+
+  return aggregate;
+}
+
+function maxSeverity(a: DriftSeverity, b: DriftSeverity): DriftSeverity {
+  const order: DriftSeverity[] = ["none", "warn", "tamper"];
+  return order.indexOf(a) >= order.indexOf(b) ? a : b;
 }
 
 function timeSince(date: Date): string {

@@ -30,6 +30,11 @@ program
   )
   .option("-f, --force", "Overwrite existing files without prompting", false)
   .option("--no-detect", "Skip auto-detection, create empty config")
+  .option(
+    "--workspace",
+    "Monorepo mode: discover workspace packages and scaffold a per-package .aware.json that extends the root",
+    false,
+  )
   .action(initCommand);
 
 program
